@@ -7,7 +7,8 @@ use crate::notify::{self, WM_NOTIF};
 use crate::settings::Settings;
 use crate::settings_win::{self, Action};
 use crate::update::{self, Outcome, WM_UPDATE};
-use crate::ui::{Hit, Need, Ui};
+use crate::sys::{self, SysMsg, WM_SYS};
+use crate::ui::{Hit, Need, StatusData, Ui};
 use windows::Win32::UI::Shell::{Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW};
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -109,6 +110,7 @@ struct App {
     settings: Settings,
     /// a downloaded, checked update waits to be swapped in (its version)
     update_ready: Option<String>,
+    clock: String,
 }
 
 /// `%APPDATA%\DynamicIsland\settings.ini`
@@ -245,6 +247,7 @@ impl App {
 
     /// Full screen / maximized window: asked about once a second (Windows has no cheaper way to tell us).
     fn check_env(&mut self) {
+        self.update_clock();
         let mut env = self.ui.env();
         unsafe {
             let mut fs = false;
@@ -326,7 +329,12 @@ impl App {
             log(&format!("notifications: showing {}", list.len()));
         }
         for n in list {
-            self.ui.push_notification(n);
+            // Windows announces "Bluetooth turned on" etc. as toasts: those become the island's own status pill
+            if let Some((key, on)) = crate::sysicons::toast_to_sys(&n.app, &n.title) {
+                self.ui.push_status(StatusData::Sys { key: key.to_string(), on });
+            } else {
+                self.ui.push_notification(n);
+            }
         }
         self.present();
         self.kick();
@@ -361,6 +369,11 @@ impl App {
                 self.ui.dismiss_bubble();
                 open_app(&aumid);
             }
+            Hit::HomeRow(i) => {
+                let aumid = self.ui.home_take(i);
+                open_app(&aumid);
+            }
+            Hit::HomeClear => self.ui.clear_log(),
             Hit::LyricsToggle => {
                 self.ui.toggle_lyrics();
                 self.start_lyrics_lookup();
@@ -428,6 +441,40 @@ impl App {
                 self.pw = pw;
                 self.ph = ph;
                 self.center();
+            }
+        }
+    }
+
+    /// Something about the system changed (Wi-Fi, battery, Do Not Disturb ...).
+    fn on_sys(&mut self) {
+        let list: Vec<SysMsg> = self.shared.sys.lock().map(|mut g| std::mem::take(&mut *g)).unwrap_or_default();
+        for m in list {
+            match m {
+                SysMsg::Toggle(key, on) => self.ui.push_status(StatusData::Sys { key, on }),
+                SysMsg::Battery { label, level, charging, low } => self.ui.push_status(StatusData::Battery { label, level, charging, low }),
+                SysMsg::Dnd { on, first } => {
+                    self.ui.set_dnd(on);
+                    if !first {
+                        self.ui.push_status(StatusData::Sys { key: "dnd".into(), on });
+                    }
+                }
+            }
+        }
+        self.present();
+        self.kick();
+    }
+
+    /// The date and time line of the home view ("Friday, 27 November  14:05").
+    fn update_clock(&mut self) {
+        const DAYS: [&str; 7] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+        const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+        let text = format!("{}, {} {}  {:02}:{:02}", DAYS[t.wDayOfWeek as usize % 7], t.wDay, MONTHS[(t.wMonth as usize).clamp(1, 12) - 1], t.wHour, t.wMinute);
+        if self.clock != text {
+            self.clock = text.clone();
+            self.ui.set_clock(text);
+            if self.ui.is_open() {
+                self.present();
             }
         }
     }
@@ -806,6 +853,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
                 add_tray_icon(hwnd);
                 return LRESULT(0);
             }
+            WM_SYS => {
+                with_app(|a| a.on_sys());
+                return LRESULT(0);
+            }
             WM_UPDATE => {
                 with_app(|a| a.on_update());
                 return LRESULT(0);
@@ -934,12 +985,13 @@ pub fn run() {
 
         let shared = Arc::new(Shared::default());
         APP.with(|a| {
-            *a.borrow_mut() = Some(App { hwnd, ui, mem_dc, bits: bits as *mut u8, pw, ph, shared: shared.clone(), tracking: false, timer: Need::Rest, last: Instant::now(), bmp, dpi_scale, settings, update_ready: None });
+            *a.borrow_mut() = Some(App { hwnd, ui, mem_dc, bits: bits as *mut u8, pw, ph, shared: shared.clone(), tracking: false, timer: Need::Rest, last: Instant::now(), bmp, dpi_scale, settings, update_ready: None, clock: String::new() });
         });
         with_app(|a| a.present());
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         media::start(hwnd.0 as isize, shared.clone());
-        notify::start(hwnd.0 as isize, shared);
+        notify::start(hwnd.0 as isize, shared.clone());
+        sys::start(hwnd.0 as isize, shared);
         SetTimer(hwnd, TIMER_ENV, 1000, None);
         SetTimer(hwnd, TIMER_UPD, 25_000, None); // the first look for a new version, shortly after start
         settings_win::set_sink(Box::new(on_settings_action));

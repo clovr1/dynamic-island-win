@@ -60,6 +60,16 @@ struct Icon {
     shape: Shape,
 }
 
+/// A system change shown as the slim status pill.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StatusData {
+    /// a quick setting (see sysicons::info for the keys) switched on / off
+    Sys { key: String, on: bool },
+    /// battery: "Charging" / "Unplugged" / "Low Battery"
+    Battery { label: String, level: i32, charging: bool, low: bool },
+}
+
+#[derive(Clone)]
 struct Notif {
     app: String,
     aumid: String,
@@ -67,6 +77,13 @@ struct Notif {
     body: String,
     icon: Option<std::rc::Rc<Icon>>,
     count: u32,
+    status: Option<StatusData>,
+}
+
+/// One line of the notification list in the home view.
+struct LogEntry {
+    n: Notif,
+    at: Instant,
 }
 
 /// What the window must look up (title / artist / length of the song).
@@ -128,6 +145,10 @@ pub enum Hit {
     LyricLine(f32),
     /// the small pill, or the cover / title in the player: bring the music app forward
     OpenSource,
+    /// a line of the notification list (home view)
+    HomeRow(usize),
+    /// "Clear" in the home view
+    HomeClear,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -235,6 +256,15 @@ pub struct Ui {
     leave_acc: f32,
     card: Option<Card>,
     queue: VecDeque<Notif>,
+    /// the notification list of the home view (newest first)
+    log: Vec<LogEntry>,
+    dnd: bool,
+    sys_last: Vec<(String, bool, Instant)>,
+    status_since: f32,
+    /// the date and time shown in the home view (set by the window)
+    clock: String,
+    /// the home view was closed by a click: stays closed until the mouse has left
+    open_block: bool,
     gap: f32,
     bubble: Option<Bubble>,
     t: f32,
@@ -408,6 +438,12 @@ impl Ui {
             leave_acc: 0.0,
             card: None,
             queue: VecDeque::new(),
+            log: Vec::new(),
+            dnd: false,
+            sys_last: Vec::new(),
+            status_since: 0.0,
+            clock: String::new(),
+            open_block: false,
             gap: 0.0,
             bubble: None,
             t: 0.0,
@@ -666,12 +702,85 @@ impl Ui {
         self.media.playing = !self.media.playing;
     }
 
+    /// Do Not Disturb switched on / off: while it is on, notifications only go to the list.
+    pub fn set_dnd(&mut self, on: bool) {
+        self.dnd = on;
+        if on && self.cfg.dnd_quiet {
+            self.bubble = None;
+            self.queue.retain(|n| n.status.is_some());
+            if self.card.as_ref().map(|c| c.n.status.is_none()).unwrap_or(false) {
+                self.card = None;
+            }
+        }
+    }
+
+    /// The date / time line of the home view.
+    pub fn set_clock(&mut self, text: String) {
+        self.clock = text;
+    }
+
+    pub fn has_log(&self) -> bool {
+        !self.log.is_empty()
+    }
+
+    /// A row of the home list was clicked: drop it, close the view, and give back the app to open.
+    pub fn home_take(&mut self, i: usize) -> String {
+        let aumid = if i < self.log.len() { self.log.remove(i).n.aumid } else { String::new() };
+        self.open = false;
+        self.open_block = true;
+        self.retarget();
+        aumid
+    }
+
+    pub fn clear_log(&mut self) {
+        self.log.clear();
+        self.retarget();
+    }
+
+    fn home_h(&self) -> f32 {
+        let n = self.log.len().min(3);
+        if n > 0 { 66.0 + 44.0 * n as f32 } else { 112.0 }
+    }
+
+    /// A system change (Wi-Fi, battery ...): the slim status pill.
+    pub fn push_status(&mut self, st: StatusData) {
+        if !self.cfg.status_pills {
+            return;
+        }
+        if let StatusData::Sys { key, on } = &st {
+            // the same change reported twice (our own detector and Windows' toast)
+            self.sys_last.retain(|(_, _, at)| at.elapsed().as_secs() < 10);
+            if self.sys_last.iter().any(|(k, o, at)| k == key && o == on && at.elapsed().as_secs_f32() < 3.0) {
+                return;
+            }
+            self.sys_last.push((key.clone(), *on, Instant::now()));
+        }
+        let n = Notif { app: String::new(), aumid: String::new(), title: String::new(), body: String::new(), icon: None, count: 1, status: Some(st) };
+        self.queue.retain(|q| q.status.is_none());
+        match &mut self.card {
+            Some(c) if c.n.status.is_some() => {
+                // a pill is already up: it changes in place
+                c.n = n;
+                c.left = 3.5;
+                c.age = 0.0;
+                self.status_since = self.t;
+            }
+            Some(_) => self.queue.push_back(n),
+            None => {
+                self.bubble = None;
+                self.card = Some(Card { n, left: 3.5, age: 0.0, from_bubble: false, away: 0.0 });
+                self.status_since = self.t;
+            }
+        }
+        self.retarget();
+    }
+
     pub fn push_notification(&mut self, d: NotifData) {
         if !self.cfg.notifications {
             return;
         }
         let icon = d.icon.and_then(make_icon).map(std::rc::Rc::new);
-        let mut n = Notif { app: d.app, aumid: d.aumid, title: d.title, body: d.body, icon, count: 1 };
+        let mut n = Notif { app: d.app, aumid: d.aumid, title: d.title, body: d.body, icon, count: 1, status: None };
         // the very same notification again (a browser re-sends "You have unseen notifications" over and over): nothing new to show
         let same = |o: &Notif| o.app == n.app && o.title == n.title && o.body == n.body;
         if self.card.as_ref().map(|c| same(&c.n)).unwrap_or(false) || self.bubble.as_ref().map(|b| same(&b.n)).unwrap_or(false) || self.queue.back().map(same).unwrap_or(false) {
@@ -686,6 +795,12 @@ impl Ui {
         self.recent.push((sig, Instant::now()));
         if self.recent.len() > 24 {
             self.recent.remove(0);
+        }
+        // the list in the home view keeps everything (also what Do Not Disturb kept quiet)
+        self.log.insert(0, LogEntry { n: n.clone(), at: Instant::now() });
+        self.log.truncate(8);
+        if self.dnd && self.cfg.dnd_quiet {
+            return;
         }
         // while music plays in the small pill: a small bubble beside it. Otherwise: a card.
         if self.mode() == Mode::Play && !self.concealed() && self.cfg.use_bubble {
@@ -738,7 +853,7 @@ impl Ui {
     pub fn mode(&self) -> Mode {
         if self.card.is_some() {
             Mode::Card
-        } else if self.open && self.media.active {
+        } else if self.open {
             Mode::Open
         } else if self.media.active && self.media.playing && !self.pf() && self.cfg.show_music_pill {
             Mode::Play
@@ -777,14 +892,20 @@ impl Ui {
     fn retarget(&mut self) {
         let notch = self.notch() && self.mode() == Mode::Play;
         let hang = self.attached();
+        let home = !self.media.active;
+        let status = self.card.as_ref().map(|c| c.n.status.is_some()).unwrap_or(false);
         let (w, h, y, rt, rb) = match self.mode() {
             Mode::Idle => (120.0, 36.0, TOP, 18.0, 18.0),
             Mode::Play if notch => (if self.lyric_line_active() && !self.line_text.is_empty() { self.notch_line_w } else { NOTCH_W }, 28.0, 0.0, 0.0, 17.0),
             Mode::Play if self.lyric_line_active() && !self.line_text.is_empty() => (self.line_w, 40.0, TOP, 20.0, 20.0),
             Mode::Play => (240.0, 40.0, TOP, 20.0, 20.0),
             // under a maximized window the big island is an enlarged notch: it stays on the top edge
+            Mode::Open if home && hang => (380.0, self.home_h() + 10.0, 0.0, 0.0, 30.0),
+            Mode::Open if home => (380.0, self.home_h(), TOP, 36.0, 36.0),
             Mode::Open if hang => (self.open_w(), self.open_height() + 10.0, 0.0, 0.0, 34.0),
             Mode::Open => (400.0, self.open_height(), TOP, 42.0, 42.0),
+            Mode::Card if status && hang => (272.0, 48.0, 0.0, 0.0, 22.0),
+            Mode::Card if status => (272.0, 44.0, TOP, 22.0, 22.0),
             Mode::Card if hang => (360.0, 74.0, 0.0, 0.0, 30.0),
             Mode::Card => (360.0, 70.0, TOP, 35.0, 35.0),
         };
@@ -919,7 +1040,11 @@ impl Ui {
         } else if self.gap > 0.0 {
             self.gap -= dt;
         } else if let Some(n) = self.queue.pop_front() {
-            self.card = Some(Card { n, left: self.cfg.card_secs as f32, age: 0.0, from_bubble: false, away: 0.0 });
+            let secs = if n.status.is_some() { 3.5 } else { self.cfg.card_secs as f32 };
+            if n.status.is_some() {
+                self.status_since = self.t;
+            }
+            self.card = Some(Card { n, left: secs, age: 0.0, from_bubble: false, away: 0.0 });
         }
         if let Some(b) = &mut self.bubble {
             b.left -= dt;
@@ -934,10 +1059,13 @@ impl Ui {
         }
 
         // hovering opens the player after a short moment; leaving closes it after a longer one (a flick of the mouse does nothing)
+        if !over_pill {
+            self.open_block = false;
+        }
         if over_pill && self.card.is_none() {
             self.hover_acc += dt;
             self.leave_acc = 0.0;
-            if self.hover_acc >= 0.06 && self.media.active {
+            if self.hover_acc >= 0.06 && !self.open_block {
                 self.open = true;
             }
         } else {
@@ -970,7 +1098,7 @@ impl Ui {
     pub fn need(&self) -> Need {
         let springs = !self.tweens().iter().all(|s| s.settled());
         let over = self.cursor.is_some();
-        let delay = (over && !self.open && self.media.active) || (!over && self.open);
+        let delay = (over && !self.open && !self.open_block) || (!over && self.open);
         if springs || delay {
             return Need::Fast;
         }
@@ -1026,6 +1154,21 @@ impl Ui {
         }
         if self.mode() == Mode::Play {
             return Hit::OpenSource;
+        }
+        if self.mode() == Mode::Open && !self.media.active {
+            if self.w.x > 340.0 {
+                let (rx, ry) = (x - r.0, y - r.1 - self.pad.x);
+                if ry < 46.0 && rx > r.2 - 100.0 && !self.log.is_empty() {
+                    return Hit::HomeClear;
+                }
+                if ry >= 50.0 {
+                    let i = ((ry - 50.0) / 44.0) as usize;
+                    if i < self.log.len().min(3) {
+                        return Hit::HomeRow(i);
+                    }
+                }
+            }
+            return Hit::Pill;
         }
         if self.mode() == Mode::Open && self.w.x > 340.0 {
             let l = self.open_layout();
@@ -1149,7 +1292,7 @@ impl Ui {
 
     /// Should the mouse cursor be a hand here?
     pub fn wants_hand(&self, px: f32, py: f32) -> bool {
-        matches!(self.hit(px, py), Hit::Prev | Hit::PlayPause | Hit::Next | Hit::LyricsToggle | Hit::Seek(_) | Hit::Card(_) | Hit::Bubble | Hit::OpenSource | Hit::LyricLine(_))
+        matches!(self.hit(px, py), Hit::Prev | Hit::PlayPause | Hit::Next | Hit::LyricsToggle | Hit::Seek(_) | Hit::Card(_) | Hit::Bubble | Hit::OpenSource | Hit::LyricLine(_) | Hit::HomeRow(_) | Hit::HomeClear)
     }
 
     /// Mouse wheel over the lyrics: scroll by hand (the lyrics stop following the song for a few seconds).
@@ -1270,6 +1413,17 @@ impl Ui {
             self.draw_bubble();
         }
 
+        if let Some(StatusData::Sys { .. } | StatusData::Battery { .. }) = self.card.as_ref().and_then(|c| c.n.status.clone()) {
+            let st = self.card.as_ref().and_then(|c| c.n.status.clone()).unwrap();
+            let a = smooth((w - 200.0) / 60.0);
+            self.draw_status(x0, y0, w, h, a, &st);
+            return;
+        }
+        if !self.media.active && self.mode() == Mode::Open {
+            let a = smooth((w - 330.0) / 40.0) * smooth((h - 60.0) / 36.0);
+            self.draw_home(x0, y0, w, h, a);
+            return;
+        }
         if let Some(card) = self.card.as_ref() {
             let a = smooth((w - 250.0) / 100.0);
             // (borrowed fields are copied out first)
@@ -1405,6 +1559,95 @@ impl Ui {
         self.fonts.draw(&mut self.pm, Weight::Semibold, &title, tx * s, (y0 + 32.0) * s, 15.0 * s, WHITE, a);
         self.fonts.draw(&mut self.pm, Weight::Regular, &body, tx * s, (y0 + 51.0) * s, 13.0 * s, [142, 142, 147], a);
         self.fonts.draw(&mut self.pm, Weight::Regular, &label, (x0 + w - 20.0) * s - lw, (y0 + 27.0) * s, 12.0 * s, [99, 99, 102], a);
+    }
+
+    /// The slim status pill: icon and name on the left, On / Off (or the battery level) on the right.
+    fn draw_status(&mut self, x0: f32, y0: f32, w: f32, h: f32, a: f32, st: &StatusData) {
+        let s = self.scale;
+        let cy = y0 + h / 2.0;
+        let pop = clamp01((self.t - self.status_since) / 0.45);
+        const GRAY: [u8; 3] = [142, 142, 147];
+        match st {
+            StatusData::Sys { key, on } => {
+                let (label, color) = crate::sysicons::info(key);
+                let col = if *on { color } else { GRAY };
+                crate::sysicons::draw(&mut self.pm, key, (x0 + 31.0) * s, cy * s, 22.0 * s, col, a, *on, pop);
+                self.fonts.draw(&mut self.pm, Weight::Semibold, label, (x0 + 52.0) * s, (cy + 5.4) * s, 15.0 * s, WHITE, a);
+                let t = if *on { "On" } else { "Off" };
+                let tw = self.fonts.measure(Weight::Semibold, t, 14.5 * s);
+                self.fonts.draw(&mut self.pm, Weight::Semibold, t, (x0 + w - 22.0) * s - tw, (cy + 5.2) * s, 14.5 * s, if *on { color } else { GRAY }, a);
+            }
+            StatusData::Battery { label, level, charging, low } => {
+                let green = [48, 209, 88];
+                let red = [255, 69, 58];
+                let mut lx = x0 + 22.0;
+                if *charging && !*low {
+                    crate::sysicons::draw(&mut self.pm, "bolt", (lx + 8.0) * s, cy * s, 18.0 * s, green, a, true, pop);
+                    lx += 22.0;
+                }
+                let fill = if *low { red } else if *charging { green } else { WHITE };
+                self.fonts.draw(&mut self.pm, Weight::Semibold, label, lx * s, (cy + 5.4) * s, 15.0 * s, if *low { red } else { WHITE }, a);
+                let pct = format!("{}%", level);
+                let pw = self.fonts.measure(Weight::Semibold, &pct, 14.5 * s);
+                let right = x0 + w - 22.0;
+                self.fonts.draw(&mut self.pm, Weight::Semibold, &pct, right * s - pw, (cy + 5.2) * s, 14.5 * s, GRAY, a);
+                // the battery: outline, level, cap
+                let (bw, bh) = (28.0, 14.0);
+                let bx = right - pw / s - 10.0 - bw - 2.5;
+                let by = cy - bh / 2.0;
+                gfx::fill_rrect(&mut self.pm, bx * s, by * s, bw * s, bh * s, [4.2 * s; 4], [99, 99, 102], a);
+                gfx::fill_rrect(&mut self.pm, (bx + 1.4) * s, (by + 1.4) * s, (bw - 2.8) * s, (bh - 2.8) * s, [3.0 * s; 4], BLACK, a);
+                let fw = ((bw - 4.6) * (*level as f32 / 100.0).clamp(0.0, 1.0)).max(2.0);
+                gfx::fill_rrect(&mut self.pm, (bx + 2.3) * s, (by + 2.3) * s, fw * s, (bh - 4.6) * s, [2.2 * s; 4], fill, a);
+                gfx::fill_rrect(&mut self.pm, (bx + bw + 1.0) * s, (cy - 2.5) * s, 2.2 * s, 5.0 * s, [1.1 * s; 4], [99, 99, 102], a);
+            }
+        }
+        let _ = h;
+    }
+
+    /// The home view (nothing is playing): the date and the latest notifications.
+    fn draw_home(&mut self, x0: f32, y0: f32, w: f32, h: f32, a: f32) {
+        let s = self.scale;
+        const GRAY: [u8; 3] = [142, 142, 147];
+        let _ = h;
+        let rows = self.log.len().min(3);
+        if rows == 0 {
+            let t = "All quiet";
+            let tw = self.fonts.measure(Weight::Semibold, t, 15.5 * s);
+            self.fonts.draw(&mut self.pm, Weight::Semibold, t, (x0 + w / 2.0) * s - tw / 2.0, (y0 + 52.0) * s, 15.5 * s, WHITE, a);
+            let sub = if self.clock.is_empty() { "No notifications".to_string() } else { format!("No notifications - {}", self.clock) };
+            let sub = self.fonts.fit(Weight::Regular, &sub, 12.5 * s, (w - 36.0) * s);
+            let sw = self.fonts.measure(Weight::Regular, &sub, 12.5 * s);
+            self.fonts.draw(&mut self.pm, Weight::Regular, &sub, (x0 + w / 2.0) * s - sw / 2.0, (y0 + 73.0) * s, 12.5 * s, GRAY, a);
+            return;
+        }
+        // header: the date on the left, "Clear" on the right
+        let date = self.fonts.fit(Weight::Regular, &self.clock.clone(), 13.0 * s, (w - 110.0) * s);
+        self.fonts.draw(&mut self.pm, Weight::Regular, &date, (x0 + 22.0) * s, (y0 + 32.0) * s, 13.0 * s, GRAY, a);
+        let clear_hover = self.cursor.map(|(cx, cy)| matches!(self.hit(cx, cy), Hit::HomeClear)).unwrap_or(false);
+        let cw = self.fonts.measure(Weight::Regular, "Clear", 12.5 * s);
+        self.fonts.draw(&mut self.pm, Weight::Regular, "Clear", (x0 + w - 22.0) * s - cw, (y0 + 32.0) * s, 12.5 * s, if clear_hover { WHITE } else { GRAY }, a);
+        let hov_row = self.cursor.and_then(|(cx, cy)| if let Hit::HomeRow(i) = self.hit(cx, cy) { Some(i) } else { None });
+        for i in 0..rows {
+            let top = y0 + 50.0 + 44.0 * i as f32;
+            if hov_row == Some(i) {
+                gfx::fill_rrect(&mut self.pm, (x0 + 10.0) * s, top * s, (w - 20.0) * s, 42.0 * s, [14.0 * s; 4], [28, 28, 30], a);
+            }
+            let (name, title, body, icon, at) = {
+                let e = &self.log[i];
+                (if e.n.app.is_empty() { e.n.title.clone() } else { e.n.app.clone() }, e.n.title.clone(), e.n.body.clone(), e.n.icon.clone(), e.at)
+            };
+            self.draw_icon(icon.as_deref(), &name, x0 + 20.0, top + 7.0, 28.0, 8.0, a);
+            let secs = at.elapsed().as_secs();
+            let ago = if secs < 45 { "now".to_string() } else if secs < 3600 { format!("{}m", (secs / 60).max(1)) } else if secs < 86400 { format!("{}h", secs / 3600) } else { format!("{}d", secs / 86400) };
+            let aw = self.fonts.measure(Weight::Regular, &ago, 12.0 * s);
+            self.fonts.draw(&mut self.pm, Weight::Regular, &ago, (x0 + w - 22.0) * s - aw, (top + 18.0) * s, 12.0 * s, [99, 99, 102], a);
+            let max_w = (w - 20.0 - 58.0 - 18.0) - aw / s - 10.0;
+            let t = self.fonts.fit(Weight::Semibold, &title, 13.5 * s, max_w * s);
+            let b = self.fonts.fit(Weight::Regular, &body, 12.0 * s, max_w * s);
+            self.fonts.draw(&mut self.pm, Weight::Semibold, &t, (x0 + 58.0) * s, (top + 18.0) * s, 13.5 * s, WHITE, a);
+            self.fonts.draw(&mut self.pm, Weight::Regular, &b, (x0 + 58.0) * s, (top + 34.0) * s, 12.0 * s, GRAY, a);
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

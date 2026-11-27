@@ -33,6 +33,8 @@ pub struct Shared {
     pub lyrics: Mutex<Vec<crate::net::LyricsMsg>>,
     /// notifications waiting for the window
     pub notifs: Mutex<Vec<crate::ui::NotifData>>,
+    /// system changes (Wi-Fi, battery, Do Not Disturb ...) waiting for the window
+    pub sys: Mutex<Vec<crate::sys::SysMsg>>,
 }
 
 #[derive(Clone, Copy)]

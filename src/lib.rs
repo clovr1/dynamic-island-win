@@ -5,6 +5,7 @@ pub mod lyrics;
 pub mod panel;
 pub mod settings;
 pub mod svgpath;
+pub mod sysicons;
 pub mod ui;
 pub mod version;
 
@@ -12,6 +13,8 @@ pub mod version;
 pub mod media;
 #[cfg(windows)]
 pub mod net;
+#[cfg(windows)]
+pub mod sys;
 #[cfg(windows)]
 pub mod settings_win;
 #[cfg(windows)]

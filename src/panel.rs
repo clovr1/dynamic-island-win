@@ -63,6 +63,9 @@ pub enum Id {
     DemoNotif,
     DemoMax,
     DemoFs,
+    DemoStatus,
+    StatusPills,
+    DndQuiet,
     Theme(u8),
 }
 
@@ -142,6 +145,7 @@ pub struct Panel {
     cursor_in: bool,
     preview_hand: bool,
     preview_down: bool,
+    status_n: usize,
 }
 
 /// A made-up song for the preview (a gradient cover, so the equalizer takes its colour from it).
@@ -207,6 +211,7 @@ impl Panel {
             cursor_in: false,
             preview_hand: false,
             preview_down: false,
+            status_n: 0,
         };
         p.status = format!("Updates come from github.com/{}", p.s.update_repo);
         p.resize(size_px.0, size_px.1);
@@ -234,6 +239,19 @@ impl Panel {
     fn feed_lyrics(&mut self) {
         if let Some(r) = self.preview.take_lyrics_request() {
             self.preview.set_lyrics(&r.key, Some(Found { synced: true, lines: parse_lrc(SAMPLE_LRC) }));
+        }
+    }
+
+    fn demo_status(&mut self) {
+        use crate::ui::StatusData;
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as usize).unwrap_or(0);
+        let keys = ["wifi", "bluetooth", "airplane", "dnd", "nightlight", "energy", "hotspot", "cellular"];
+        self.status_n += 1;
+        if self.status_n % 9 == 0 {
+            self.preview.push_status(StatusData::Battery { label: "Charging".into(), level: 64, charging: true, low: false });
+        } else {
+            let key = keys[(t / 7 + self.status_n) % keys.len()];
+            self.preview.push_status(StatusData::Sys { key: key.into(), on: self.status_n % 2 == 1 });
         }
     }
 
@@ -308,6 +326,8 @@ impl Panel {
             2 => vec![
                 Row::Toggle(Id::Notif, "Show notifications in the island", "Messages from your apps appear at the top of the screen", s.notifications),
                 Row::Toggle(Id::Bubble, "Small bubble next to the music pill", "A small bubble while music plays, otherwise a card", s.use_bubble),
+                Row::Toggle(Id::StatusPills, "Status pills", "A slim pill when Wi-Fi, Bluetooth, airplane mode, battery ... change", s.status_pills),
+                Row::Toggle(Id::DndQuiet, "Respect Do Not Disturb", "While it is on, notifications are only listed in the island's home view", s.dnd_quiet),
                 Row::Slider(Id::CardSecs, "How long a card stays", "Seconds before it goes away", s.card_secs as f32, 2.0, 20.0, format!("{} s", s.card_secs)),
                 Row::Button(Id::Test, "Test", "Show a test notification now".into(), "Show".into(), 0),
             ],
@@ -441,7 +461,7 @@ impl Panel {
         self.fonts.draw(&mut pm, Weight::Semibold, PAGES[self.page as usize], cx * s, 276.0 * s, 24.0 * s, TEXT, 1.0);
         // the buttons that make the preview show things
         let mut bx = cx + cw;
-        for (id, label, on) in [(Id::DemoFs, "Full-screen app", self.demo_fs), (Id::DemoMax, "Maximized window", self.demo_max), (Id::DemoNotif, "Send notification", false)] {
+        for (id, label, on) in [(Id::DemoFs, "Full-screen", self.demo_fs), (Id::DemoMax, "Maximized", self.demo_max), (Id::DemoStatus, "Status pill", false), (Id::DemoNotif, "Notification", false)] {
             let tw = self.fonts.measure(Weight::Semibold, label, 12.5 * s) / s;
             let bw = tw + 26.0;
             bx -= bw;
@@ -769,6 +789,8 @@ impl Panel {
             Id::Bubble => s.use_bubble = !s.use_bubble,
             Id::FsHide => s.fullscreen_hide = !s.fullscreen_hide,
             Id::CheckUpd => s.check_updates = !s.check_updates,
+            Id::StatusPills => s.status_pills = !s.status_pills,
+            Id::DndQuiet => s.dnd_quiet = !s.dnd_quiet,
             Id::Theme(n) => {
                 if s.theme == n {
                     return None;
@@ -783,6 +805,10 @@ impl Panel {
             }
             Id::DemoNotif => {
                 self.demo_notification();
+                return None;
+            }
+            Id::DemoStatus => {
+                self.demo_status();
                 return None;
             }
             Id::DemoMax => {

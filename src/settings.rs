@@ -32,6 +32,10 @@ pub struct Settings {
     pub update_repo: String,
     /// colour theme of the settings window (index into panel::THEMES)
     pub theme: u8,
+    /// quick-setting and battery pills (Wi-Fi, Bluetooth, charging ...)
+    pub status_pills: bool,
+    /// notifications stay quiet (only listed) while Windows' Do Not Disturb is on
+    pub dnd_quiet: bool,
 }
 
 impl Default for Settings {
@@ -51,6 +55,8 @@ impl Default for Settings {
             check_updates: true,
             update_repo: "clovr1/dynamic-island-win".to_string(),
             theme: 0,
+            status_pills: true,
+            dnd_quiet: true,
         }
     }
 }
@@ -97,6 +103,8 @@ impl Settings {
                 "accent_eq" => s.accent_eq = b.unwrap_or(s.accent_eq),
                 "check_updates" => s.check_updates = b.unwrap_or(s.check_updates),
                 "update_repo" => s.update_repo = v.to_string(),
+                "status_pills" => s.status_pills = parse_bool(v).unwrap_or(s.status_pills),
+                "dnd_quiet" => s.dnd_quiet = parse_bool(v).unwrap_or(s.dnd_quiet),
                 "theme" => s.theme = v.trim().parse().unwrap_or(0),
                 _ => {}
             }
@@ -123,7 +131,7 @@ impl Settings {
         format!(
             "# Dynamic Island settings (you can edit this file; the island reads it when it starts)\n\
              show_music_pill = {}\nhide_when_player_front = {}\nnotifications = {}\nuse_bubble = {}\ncard_secs = {}\nlyrics_button = {}\n\
-             maximized = {}\nfullscreen_hide = {}\nscale_pct = {}\nspeed_pct = {}\naccent_eq = {}\ncheck_updates = {}\nupdate_repo = {}\ntheme = {}\n",
+             maximized = {}\nfullscreen_hide = {}\nscale_pct = {}\nspeed_pct = {}\naccent_eq = {}\ncheck_updates = {}\nupdate_repo = {}\ntheme = {}\nstatus_pills = {}\ndnd_quiet = {}\n",
             b(self.show_music_pill),
             b(self.hide_when_player_front),
             b(self.notifications),
@@ -141,7 +149,9 @@ impl Settings {
             b(self.accent_eq),
             b(self.check_updates),
             self.update_repo,
-            self.theme
+            self.theme,
+            b(self.status_pills),
+            b(self.dnd_quiet)
         )
     }
 }
