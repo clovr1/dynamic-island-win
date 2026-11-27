@@ -142,6 +142,13 @@ fn with_app<R>(f: impl FnOnce(&mut App) -> R) -> Option<R> {
 
 impl App {
     fn present(&mut self) {
+        // sound effects the island wants to make
+        let snd = self.ui.take_sounds();
+        if self.settings.sounds {
+            for s in snd {
+                crate::sound::play(s, self.settings.volume);
+            }
+        }
         let pm = self.ui.render();
         unsafe {
             let dst = std::slice::from_raw_parts_mut(self.bits, (self.pw * self.ph * 4) as usize);

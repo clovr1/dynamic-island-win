@@ -14,6 +14,8 @@ pub mod media;
 #[cfg(windows)]
 pub mod net;
 #[cfg(windows)]
+pub mod sound;
+#[cfg(windows)]
 pub mod sys;
 #[cfg(windows)]
 pub mod settings_win;

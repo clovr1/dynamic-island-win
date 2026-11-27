@@ -69,6 +69,8 @@ pub enum Id {
     DemoStatus,
     StatusPills,
     DndQuiet,
+    Sounds,
+    Volume,
     Theme(u8),
 }
 
@@ -355,6 +357,11 @@ impl Panel {
     }
 
     /// The draft was applied: it is now what the running island has.
+    /// Sounds the live island wants to play (the window plays them with the draft's volume).
+    pub fn take_sounds(&mut self) -> Vec<crate::ui::Sound> {
+        self.preview.take_sounds()
+    }
+
     pub fn mark_saved(&mut self) {
         self.needs_full = true;
         self.saved = self.s.clone();
@@ -424,6 +431,8 @@ impl Panel {
             ],
             4 => vec![
                 Row::Themes(s.theme),
+                Row::Toggle(Id::Sounds, "Sound effects", "A soft sound when the island opens, closes, and for notifications", s.sounds),
+                Row::Slider(Id::Volume, "Volume", "How loud the sound effects are", s.volume as f32, 0.0, 100.0, format!("{} %", s.volume)),
                 Row::Slider(Id::Scale, "Size", "Makes the whole island bigger or smaller", s.scale_pct as f32, 80.0, 140.0, format!("{} %", s.scale_pct)),
                 Row::Slider(Id::Speed, "Animation speed", "Slower is calmer, faster is snappier", s.speed_pct as f32, 50.0, 200.0, format!("{} %", s.speed_pct)),
             ],
@@ -920,7 +929,7 @@ impl Panel {
                 self.down = None;
                 None
             }
-            Some(id @ (Id::CardSecs | Id::Scale | Id::Speed)) => {
+            Some(id @ (Id::CardSecs | Id::Scale | Id::Speed | Id::Volume)) => {
                 self.drag = Some(id);
                 self.set_slider(id, x)
             }
@@ -969,6 +978,7 @@ impl Panel {
             Id::FsHide => s.fullscreen_hide = !s.fullscreen_hide,
             Id::CheckUpd => s.check_updates = !s.check_updates,
             Id::StatusPills => s.status_pills = !s.status_pills,
+            Id::Sounds => s.sounds = !s.sounds,
             Id::DndQuiet => s.dnd_quiet = !s.dnd_quiet,
             Id::Theme(n) => {
                 if s.theme == n {
@@ -1029,12 +1039,14 @@ impl Panel {
         let (lo, hi) = match id {
             Id::CardSecs => (2.0, 20.0),
             Id::Scale => (80.0, 140.0),
+            Id::Volume => (0.0, 100.0),
             _ => (50.0, 200.0),
         };
         let v = (lo + frac * (hi - lo)).round() as u32;
         let slot = match id {
             Id::CardSecs => &mut self.s.card_secs,
             Id::Scale => &mut self.s.scale_pct,
+            Id::Volume => &mut self.s.volume,
             _ => &mut self.s.speed_pct,
         };
         if *slot == v {

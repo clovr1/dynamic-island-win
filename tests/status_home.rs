@@ -83,3 +83,22 @@ fn home_view_lists_and_opens() {
     ui.clear_log();
     assert!(!ui.has_log());
 }
+
+#[test]
+fn sounds_are_asked_for() {
+    use island::ui::Sound;
+    let mut ui = ui();
+    ui.push_notification(note("Messages", "Alex"));
+    run(&mut ui, 0.5);
+    assert!(ui.take_sounds().contains(&Sound::Notify));
+    ui.push_status(StatusData::Sys { key: "wifi".into(), on: true });
+    assert!(ui.take_sounds().contains(&Sound::Status));
+    // opening and closing the home view
+    ui.set_cursor(Some((235.0, 28.0)));
+    run(&mut ui, 8.0);
+    ui.set_cursor(None);
+    run(&mut ui, 2.0);
+    let s = ui.take_sounds();
+    assert!(s.contains(&Sound::Open) && s.contains(&Sound::Close), "{s:?}");
+    assert!(ui.take_sounds().is_empty(), "taken once");
+}

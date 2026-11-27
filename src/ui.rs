@@ -60,6 +60,15 @@ struct Icon {
     shape: Shape,
 }
 
+/// The sounds the island can make (the window plays them).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Sound {
+    Open,
+    Close,
+    Notify,
+    Status,
+}
+
 /// A system change shown as the slim status pill.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StatusData {
@@ -277,6 +286,8 @@ pub struct Ui {
     open_block: bool,
     /// a click on the card unfolded its long message
     card_expanded: bool,
+    sounds: Vec<Sound>,
+    open_prev: bool,
     ghost: Option<Ghost>,
     card_lines: Vec<String>,
     gap: f32,
@@ -460,6 +471,8 @@ impl Ui {
             clock: String::new(),
             open_block: false,
             card_expanded: false,
+            sounds: Vec::new(),
+            open_prev: false,
             ghost: None,
             card_lines: Vec::new(),
             gap: 0.0,
@@ -755,6 +768,17 @@ impl Ui {
         self.retarget();
     }
 
+    /// The sounds to play since the last call.
+    pub fn take_sounds(&mut self) -> Vec<Sound> {
+        std::mem::take(&mut self.sounds)
+    }
+
+    fn sound(&mut self, s: Sound) {
+        if self.sounds.len() < 4 {
+            self.sounds.push(s);
+        }
+    }
+
     /// The card is over: it fades out (see `Ghost`).
     fn end_card(&mut self) {
         if let Some(c) = self.card.take() {
@@ -816,6 +840,7 @@ impl Ui {
             }
             self.sys_last.push((key.clone(), *on, Instant::now()));
         }
+        self.sound(Sound::Status);
         let n = Notif { app: String::new(), aumid: String::new(), title: String::new(), body: String::new(), icon: None, count: 1, status: Some(st) };
         self.queue.retain(|q| q.status.is_none());
         match &mut self.card {
@@ -889,6 +914,7 @@ impl Ui {
         } else {
             self.queue.push_back(n);
         }
+        self.sound(Sound::Notify);
         self.retarget();
     }
 
@@ -1150,6 +1176,10 @@ impl Ui {
             if self.leave_acc >= 0.30 {
                 self.open = false;
             }
+        }
+        if self.open != self.open_prev {
+            self.open_prev = self.open;
+            self.sound(if self.open { Sound::Open } else { Sound::Close });
         }
         self.update_lyric_line();
         self.retarget();

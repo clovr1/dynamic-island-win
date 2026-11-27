@@ -36,6 +36,10 @@ pub struct Settings {
     pub status_pills: bool,
     /// notifications stay quiet (only listed) while Windows' Do Not Disturb is on
     pub dnd_quiet: bool,
+    /// soft sound effects (opening, closing, notifications)
+    pub sounds: bool,
+    /// 0..=100
+    pub volume: u32,
 }
 
 impl Default for Settings {
@@ -57,6 +61,8 @@ impl Default for Settings {
             theme: 0,
             status_pills: true,
             dnd_quiet: true,
+            sounds: true,
+            volume: 40,
         }
     }
 }
@@ -104,6 +110,8 @@ impl Settings {
                 "check_updates" => s.check_updates = b.unwrap_or(s.check_updates),
                 "update_repo" => s.update_repo = v.to_string(),
                 "status_pills" => s.status_pills = parse_bool(v).unwrap_or(s.status_pills),
+                "sounds" => s.sounds = parse_bool(v).unwrap_or(s.sounds),
+                "volume" => s.volume = v.trim().parse().unwrap_or(40),
                 "dnd_quiet" => s.dnd_quiet = parse_bool(v).unwrap_or(s.dnd_quiet),
                 "theme" => s.theme = v.trim().parse().unwrap_or(0),
                 _ => {}
@@ -118,6 +126,7 @@ impl Settings {
         self.scale_pct = self.scale_pct.clamp(80, 140);
         self.speed_pct = self.speed_pct.clamp(50, 200);
         self.theme = self.theme.min(5);
+        self.volume = self.volume.min(100);
         // an "owner/repo" is letters, digits, - _ . and one slash; anything else is dropped
         let ok = self.update_repo.split('/').count() == 2 && self.update_repo.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c));
         if !ok {
@@ -131,7 +140,7 @@ impl Settings {
         format!(
             "# Dynamic Island settings (you can edit this file; the island reads it when it starts)\n\
              show_music_pill = {}\nhide_when_player_front = {}\nnotifications = {}\nuse_bubble = {}\ncard_secs = {}\nlyrics_button = {}\n\
-             maximized = {}\nfullscreen_hide = {}\nscale_pct = {}\nspeed_pct = {}\naccent_eq = {}\ncheck_updates = {}\nupdate_repo = {}\ntheme = {}\nstatus_pills = {}\ndnd_quiet = {}\n",
+             maximized = {}\nfullscreen_hide = {}\nscale_pct = {}\nspeed_pct = {}\naccent_eq = {}\ncheck_updates = {}\nupdate_repo = {}\ntheme = {}\nstatus_pills = {}\ndnd_quiet = {}\nsounds = {}\nvolume = {}\n",
             b(self.show_music_pill),
             b(self.hide_when_player_front),
             b(self.notifications),
@@ -151,7 +160,9 @@ impl Settings {
             self.update_repo,
             self.theme,
             b(self.status_pills),
-            b(self.dnd_quiet)
+            b(self.dnd_quiet),
+            b(self.sounds),
+            self.volume
         )
     }
 }

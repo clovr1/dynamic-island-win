@@ -101,6 +101,12 @@ impl Win {
                 let _ = DwmSetWindowAttribute(self.hwnd, DWMWINDOWATTRIBUTE(35), &tc.1 as *const u32 as *const c_void, 4);
             }
         }
+        let snd = self.panel.take_sounds();
+        if self.panel.s.sounds {
+            for s in snd {
+                crate::sound::play(s, self.panel.s.volume);
+            }
+        }
         let (pm, (rx, ry, rw, rh)) = self.panel.frame();
         let (pw, ph) = (pm.width() as i32, pm.height() as i32);
         unsafe {
