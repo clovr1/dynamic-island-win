@@ -2,6 +2,7 @@ pub mod anim;
 pub mod brands;
 pub mod gfx;
 pub mod lyrics;
+pub mod panel;
 pub mod settings;
 pub mod svgpath;
 pub mod ui;

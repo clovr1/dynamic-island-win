@@ -656,18 +656,7 @@ fn remove_tray_icon(hwnd: HWND) {
 
 fn open_settings() {
     if let Some(s) = with_app(|a| a.settings.clone()) {
-        settings_win::set_base(&s);
         settings_win::open(&s, autostart_enabled());
-    }
-}
-
-/// "Check for updates" from the menu: the answer comes as a card when no settings window is open.
-fn check_updates_now() {
-    let Some((h, repo, ready)) = with_app(|a| (a.hwnd.0 as isize, a.settings.update_repo.clone(), a.update_ready.is_some())) else { return };
-    if ready {
-        install_update();
-    } else if !update::busy() {
-        update::spawn_check(h, repo, true);
     }
 }
 
@@ -706,50 +695,19 @@ fn on_settings_action(a: Action) {
                 if update::busy() {
                     settings_win::set_update_status("Already checking...", false);
                 } else {
-                    settings_win::set_update_status("Checking (and downloading if there is a newer version)...", false);
+                    settings_win::set_busy("Checking (and downloading if there is a newer version)...");
                     update::spawn_check(h, s.update_repo, true);
                 }
             }
         }
         Action::Install => install_update(),
-    }
-}
-
-/// Right-click menu. Not called while the app state is borrowed (the menu runs its own message loop).
-fn show_menu(hwnd: HWND) {
-    unsafe {
-        let Ok(menu) = CreatePopupMenu() else { return };
-        let on = autostart_enabled();
-        let _ = AppendMenuW(menu, MF_STRING | if on { MF_CHECKED } else { MF_UNCHECKED }, 1, w!("Start with Windows"));
-        let _ = AppendMenuW(menu, MF_STRING, 4, w!("Settings..."));
-        let _ = AppendMenuW(menu, MF_STRING, 6, w!("Check for updates"));
-        let _ = SetMenuDefaultItem(menu, 4, 0);
-        let ready = with_app(|a| a.update_ready.clone()).flatten();
-        if let Some(v) = &ready {
-            let t: Vec<u16> = format!("Restart to update to {v}").encode_utf16().chain(std::iter::once(0)).collect();
-            let _ = AppendMenuW(menu, MF_STRING, 5, PCWSTR(t.as_ptr()));
+        Action::Test => {
+            with_app(|a| a.test_notification());
         }
-        let _ = AppendMenuW(menu, MF_STRING, 3, w!("Show a test notification"));
-        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
-        let _ = AppendMenuW(menu, MF_STRING, 2, w!("Exit"));
-        let mut pt = POINT::default();
-        let _ = GetCursorPos(&mut pt);
-        let _ = SetForegroundWindow(hwnd);
-        let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, None);
-        let _ = DestroyMenu(menu);
-        match cmd.0 {
-            1 => set_autostart(!on),
-            4 => open_settings(),
-            6 => check_updates_now(),
-            5 => install_update(),
-            3 => {
-                with_app(|a| a.test_notification());
-            }
-            2 => {
-                let _ = DestroyWindow(hwnd);
-            }
-            _ => {}
-        }
+        Action::Quit => unsafe {
+            let h = MAIN_HWND.load(Ordering::Relaxed);
+            let _ = DestroyWindow(HWND(h as *mut _));
+        },
     }
 }
 
@@ -812,10 +770,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
                     }
                 }
             }
-            WM_RBUTTONUP => {
-                show_menu(hwnd);
-                return LRESULT(0);
-            }
+            // (no context menu: everything lives in the settings window, which the tray icon opens)
+            WM_RBUTTONUP => return LRESULT(0),
             WM_TIMER if wp.0 == TIMER_ID => {
                 with_app(|a| a.on_timer());
                 return LRESULT(0);
@@ -830,8 +786,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             }
             WM_TRAY => {
                 match (lp.0 & 0xFFFF) as u32 {
-                    WM_LBUTTONUP => open_settings(),
-                    WM_RBUTTONUP => show_menu(hwnd),
+                    WM_LBUTTONUP | WM_RBUTTONUP => open_settings(),
                     _ => {}
                 }
                 return LRESULT(0);
@@ -991,9 +946,6 @@ pub fn run() {
                     if msg.message == WM_QUIT {
                         break 'outer;
                     }
-                    if settings_win::handle().map(|d| IsDialogMessageW(d, &msg).as_bool()).unwrap_or(false) {
-                        continue;
-                    }
                     let _ = TranslateMessage(&msg);
                     DispatchMessageW(&msg);
                 }
@@ -1006,9 +958,6 @@ pub fn run() {
             } else {
                 if !GetMessageW(&mut msg, None, 0, 0).as_bool() {
                     break;
-                }
-                if settings_win::handle().map(|d| IsDialogMessageW(d, &msg).as_bool()).unwrap_or(false) {
-                    continue;
                 }
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
