@@ -6,30 +6,38 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT};
 
-static OPEN: &[u8] = include_bytes!("../assets/sounds/open.wav");
-static CLOSE: &[u8] = include_bytes!("../assets/sounds/close.wav");
-static NOTIFY: &[u8] = include_bytes!("../assets/sounds/notify.wav");
-static STATUS: &[u8] = include_bytes!("../assets/sounds/status.wav");
-static PAUSE: &[u8] = include_bytes!("../assets/sounds/pause.wav");
-static PLAY: &[u8] = include_bytes!("../assets/sounds/play.wav");
-static SKIP: &[u8] = include_bytes!("../assets/sounds/skip.wav");
+macro_rules! pack {
+    ($d:literal) => {
+        [
+            include_bytes!(concat!("../assets/sounds/", $d, "/notify.wav")) as &[u8],
+            include_bytes!(concat!("../assets/sounds/", $d, "/status.wav")),
+            include_bytes!(concat!("../assets/sounds/", $d, "/pause.wav")),
+            include_bytes!(concat!("../assets/sounds/", $d, "/play.wav")),
+            include_bytes!(concat!("../assets/sounds/", $d, "/skip.wav")),
+        ]
+    };
+}
+
+/// notify, status, pause, play, skip - for each set of sounds (Bloop, Glass, Wood, Air)
+static PACKS: [[&[u8]; 5]; 4] = [pack!("bloop"), pack!("glass"), pack!("wood"), pack!("air")];
 
 /// The buffers Windows may still be playing from (it reads them while it plays): the last few are kept.
 static KEEP: Mutex<Vec<Vec<u8>>> = Mutex::new(Vec::new());
 
 /// Play `s` at `volume` (0..=100). A new sound replaces the one still playing.
-pub fn play(s: Sound, volume: u32) {
+pub fn play(s: Sound, volume: u32, pack: u8) {
     if volume == 0 {
         return;
     }
+    let p = &PACKS[(pack as usize).min(PACKS.len() - 1)];
     let src = match s {
-        Sound::Open => OPEN,
-        Sound::Close => CLOSE,
-        Sound::Notify => NOTIFY,
-        Sound::Status => STATUS,
-        Sound::Pause => PAUSE,
-        Sound::Play => PLAY,
-        Sound::Skip => SKIP,
+        Sound::Notify => p[0],
+        Sound::Status => p[1],
+        Sound::Pause => p[2],
+        Sound::Play => p[3],
+        Sound::Skip => p[4],
+        // (hovering is silent)
+        Sound::Open | Sound::Close => return,
     };
     let mut buf = src.to_vec();
     // the files are already quiet; 100 % is about twice the file (the samples start after the 44-byte header)

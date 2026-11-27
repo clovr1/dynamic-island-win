@@ -87,26 +87,116 @@ fn write_wav(path: &str, pcm: &[i16]) {
     println!("{path}: {:.0} ms, peak {}", pcm.len() as f32 * 1000.0 / SR as f32, pcm.iter().map(|v| v.unsigned_abs()).max().unwrap_or(0));
 }
 
-fn main() {
-    let dir = "assets/sounds";
-    std::fs::create_dir_all(dir).unwrap();
-    // the island grows: a rising bloop
-    write_wav(&format!("{dir}/open.wav"), &finish(bloop(330.0, 620.0, 0.15, 0.24, 0.075, 1.0), 0.16));
-    // the island shrinks: a falling, softer bloop
-    write_wav(&format!("{dir}/close.wav"), &finish(bloop(560.0, 300.0, 0.13, 0.2, 0.055, 1.0), 0.12));
-    // a notification: two soft notes going up (B5, E6)
-    let mut n = Vec::new();
-    mix_at(&mut n, &bell(659.25, 0.45, 1.0), 0.0);
-    mix_at(&mut n, &bell(880.0, 0.5, 0.9), 0.1);
-    write_wav(&format!("{dir}/notify.wav"), &finish(n, 0.2));
-    // pause: a small soft tick going down; play: the same going up; skip: two quick light ticks
+/// Band-limited noise that sweeps in pitch: a soft "whoosh" (a breath of air).
+fn air(f0: f32, f1: f32, len: f32, peak_at: f32, amp: f32) -> Vec<f32> {
+    let n = (len * SR as f32) as usize;
+    let mut seed = 0x1234_5678u32;
+    let mut noise = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        (seed as f32 / u32::MAX as f32) * 2.0 - 1.0
+    };
+    let (mut lp1, mut lp2) = (0.0f32, 0.0f32);
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / n as f32;
+            let f = f0 + (f1 - f0) * ease(t);
+            let a = (TAU * f / SR as f32).min(1.2).sin().abs().min(0.9); // a one-pole low-pass that follows the sweep
+            lp1 += (noise() - lp1) * a;
+            lp2 += (lp1 - lp2) * a;
+            let band = lp1 - lp2; // between the two: a band around f
+            // rises until `peak_at`, then falls away smoothly
+            let env = if t < peak_at { ease(t / peak_at) } else { 1.0 - ease((t - peak_at) / (1.0 - peak_at)) };
+            band * env * amp * 6.0
+        })
+        .collect()
+}
+
+/// A tap on glass: inharmonic partials that die quickly (a small, clear "tink").
+fn glass(freq: f32, len: f32, amp: f32) -> Vec<f32> {
+    let n = (len * SR as f32) as usize;
+    let partials = [(1.0f32, 1.0f32, 0.11f32), (2.76, 0.42, 0.06), (5.40, 0.16, 0.035), (8.93, 0.05, 0.02)];
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / SR as f32;
+            let attack = 1.0 - (-t / 0.0015).exp();
+            let mut s = 0.0;
+            for (m, a, tau) in partials {
+                s += (TAU * freq * m * t).sin() * a * (-t / tau).exp();
+            }
+            s * attack * amp
+        })
+        .collect()
+}
+
+/// A plucked wooden note (kalimba / marimba): the note and a bright overtone that fades before it, with a soft thump at the start.
+fn pluck(freq: f32, len: f32, amp: f32) -> Vec<f32> {
+    let n = (len * SR as f32) as usize;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / SR as f32;
+            let attack = 1.0 - (-t / 0.003).exp();
+            let body = (TAU * freq * t).sin() * (-t / 0.11).exp();
+            let over = (TAU * freq * 4.0 * t).sin() * 0.22 * (-t / 0.03).exp();
+            let thump = (TAU * freq * 0.5 * t).sin() * 0.3 * (-t / 0.02).exp();
+            (body + over + thump) * attack * amp
+        })
+        .collect()
+}
+
+fn pack_bloop(dir: &str) {
+    write_wav(&format!("{dir}/notify.wav"), &finish({ let mut n = Vec::new(); mix_at(&mut n, &bell(659.25, 0.45, 1.0), 0.0); mix_at(&mut n, &bell(880.0, 0.5, 0.9), 0.1); n }, 0.2));
+    write_wav(&format!("{dir}/status.wav"), &finish({ let mut s = bell(880.0, 0.3, 1.0); mix_at(&mut s, &bloop(240.0, 160.0, 0.05, 0.08, 0.025, 0.4), 0.0); s }, 0.15));
     write_wav(&format!("{dir}/pause.wav"), &finish(bloop(480.0, 320.0, 0.06, 0.14, 0.032, 1.0), 0.13));
     write_wav(&format!("{dir}/play.wav"), &finish(bloop(320.0, 500.0, 0.06, 0.14, 0.034, 1.0), 0.14));
-    let mut k = bell(784.0, 0.12, 1.0);
-    mix_at(&mut k, &bell(1046.5, 0.14, 0.85), 0.045);
-    write_wav(&format!("{dir}/skip.wav"), &finish(k, 0.11));
-    // a status pill (Wi-Fi, battery ...): one short, bright blip (D6) with a low "pop" under it
-    let mut s = bell(880.0, 0.3, 1.0);
-    mix_at(&mut s, &bloop(240.0, 160.0, 0.05, 0.08, 0.025, 0.4), 0.0);
-    write_wav(&format!("{dir}/status.wav"), &finish(s, 0.15));
+    write_wav(&format!("{dir}/skip.wav"), &finish({ let mut k = bell(784.0, 0.12, 1.0); mix_at(&mut k, &bell(1046.5, 0.14, 0.85), 0.045); k }, 0.11));
+}
+
+/// Glass: small, clear taps.
+fn pack_glass(dir: &str) {
+    let mut n = Vec::new();
+    mix_at(&mut n, &glass(1318.5, 0.5, 1.0), 0.0);
+    mix_at(&mut n, &glass(1760.0, 0.55, 0.8), 0.11);
+    write_wav(&format!("{dir}/notify.wav"), &finish(n, 0.15));
+    write_wav(&format!("{dir}/status.wav"), &finish(glass(1568.0, 0.35, 1.0), 0.12));
+    write_wav(&format!("{dir}/pause.wav"), &finish(glass(1046.5, 0.18, 1.0), 0.1));
+    write_wav(&format!("{dir}/play.wav"), &finish(glass(1396.9, 0.18, 1.0), 0.1));
+    let mut k = glass(1760.0, 0.1, 1.0);
+    mix_at(&mut k, &glass(2349.0, 0.12, 0.7), 0.04);
+    write_wav(&format!("{dir}/skip.wav"), &finish(k, 0.08));
+}
+
+/// Wood: warm plucked notes (kalimba).
+fn pack_wood(dir: &str) {
+    let mut n = Vec::new();
+    mix_at(&mut n, &pluck(523.25, 0.4, 1.0), 0.0);
+    mix_at(&mut n, &pluck(659.25, 0.4, 0.9), 0.09);
+    mix_at(&mut n, &pluck(783.99, 0.5, 0.85), 0.18);
+    write_wav(&format!("{dir}/notify.wav"), &finish(n, 0.2));
+    write_wav(&format!("{dir}/status.wav"), &finish(pluck(698.46, 0.3, 1.0), 0.16));
+    write_wav(&format!("{dir}/pause.wav"), &finish(pluck(392.0, 0.2, 1.0), 0.15));
+    write_wav(&format!("{dir}/play.wav"), &finish(pluck(587.33, 0.2, 1.0), 0.15));
+    let mut k = pluck(783.99, 0.1, 1.0);
+    mix_at(&mut k, &pluck(1046.5, 0.12, 0.7), 0.04);
+    write_wav(&format!("{dir}/skip.wav"), &finish(k, 0.1));
+}
+
+/// Air: breaths and soft whooshes, almost no pitch at all.
+fn pack_air(dir: &str) {
+    let mut n = air(500.0, 2600.0, 0.4, 0.45, 1.0);
+    mix_at(&mut n, &glass(1568.0, 0.35, 0.18), 0.17);
+    write_wav(&format!("{dir}/notify.wav"), &finish(n, 0.13));
+    write_wav(&format!("{dir}/status.wav"), &finish(air(900.0, 2200.0, 0.22, 0.4, 1.0), 0.1));
+    write_wav(&format!("{dir}/pause.wav"), &finish(air(1800.0, 600.0, 0.16, 0.35, 1.0), 0.1));
+    write_wav(&format!("{dir}/play.wav"), &finish(air(600.0, 1800.0, 0.16, 0.6, 1.0), 0.1));
+    write_wav(&format!("{dir}/skip.wav"), &finish(air(800.0, 3200.0, 0.14, 0.5, 1.0), 0.09));
+}
+
+fn main() {
+    for (name, f) in [("bloop", pack_bloop as fn(&str)), ("glass", pack_glass), ("wood", pack_wood), ("air", pack_air)] {
+        let dir = format!("assets/sounds/{name}");
+        std::fs::create_dir_all(&dir).unwrap();
+        f(&dir);
+    }
 }

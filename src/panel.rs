@@ -73,6 +73,7 @@ pub enum Id {
     Volume,
     PlayerVolume,
     Theme(u8),
+    Pack(u8),
 }
 
 /// What the panel asks its window to do.
@@ -97,6 +98,8 @@ enum Row {
     Radio(&'static str, &'static str, usize, [&'static str; 3]),
     /// the theme picker: chosen
     Themes(u8),
+    /// the set of sounds: chosen
+    Packs(u8),
     /// id, title, description, button text, style (0 normal / 1 primary / 2 danger)
     Button(Id, &'static str, String, String, u8),
 }
@@ -109,6 +112,7 @@ impl Row {
             Row::Slider(..) => 72.0,
             Row::Radio(..) => 68.0 + 3.0 * 42.0,
             Row::Themes(_) => 126.0,
+            Row::Packs(_) => 112.0,
         }
     }
 }
@@ -433,7 +437,8 @@ impl Panel {
             ],
             4 => vec![
                 Row::Themes(s.theme),
-                Row::Toggle(Id::Sounds, "Sound effects", "A soft sound when the island opens, closes, and for notifications", s.sounds),
+                Row::Packs(s.sound_pack),
+                Row::Toggle(Id::Sounds, "Sound effects", "Soft sounds for notifications, status pills and the play, pause and skip buttons", s.sounds),
                 Row::Slider(Id::Volume, "Volume", "How loud the sound effects are", s.volume as f32, 0.0, 100.0, format!("{} %", s.volume)),
                 Row::Slider(Id::Scale, "Size", "Makes the whole island bigger or smaller", s.scale_pct as f32, 80.0, 140.0, format!("{} %", s.scale_pct)),
                 Row::Slider(Id::Speed, "Animation speed", "Slower is calmer, faster is snappier", s.speed_pct as f32, 50.0, 200.0, format!("{} %", s.speed_pct)),
@@ -791,6 +796,30 @@ impl Panel {
                     self.hot.push(Hot { id, x: bx, y: by, w: bw, h: 56.0 });
                 }
             }
+            Row::Packs(chosen) => {
+                card(self, pm, None);
+                self.text_mid(pm, Weight::Regular, "Sound style", cx + 18.0, y + 20.0, 14.5, TEXT);
+                self.fonts.draw(pm, Weight::Regular, "Click one to hear it", (cx + 18.0) * s, (y + 42.0) * s, 12.5 * s, DIM, 1.0);
+                const PACKS: [(&str, &str); 4] = [("Bloop", "soft bubbles"), ("Glass", "tiny taps"), ("Wood", "plucked notes"), ("Air", "gentle whooshes")];
+                let n = PACKS.len() as f32;
+                let gap = 10.0;
+                let bw = (cw - 36.0 - gap * (n - 1.0)) / n;
+                for (i, (name, sub)) in PACKS.iter().enumerate() {
+                    let id = Id::Pack(i as u8);
+                    let bx = cx + 18.0 + i as f32 * (bw + gap);
+                    let by = y + 58.0;
+                    let on = *chosen as usize == i;
+                    let hov = self.hover == Some(id);
+                    let base = if on { ACCENT } else if hov { CARD_HOVER } else { BTN };
+                    rr(pm, s, bx, by, bw, 44.0, 7.0, base, 1.0);
+                    let tc = if on { ON_ACCENT } else { TEXT };
+                    let nw = self.fonts.measure(Weight::Semibold, name, 13.5 * s) / s;
+                    self.text_mid(pm, Weight::Semibold, name, bx + bw / 2.0 - nw / 2.0, by + 15.0, 13.5, tc);
+                    let sw = self.fonts.measure(Weight::Regular, sub, 11.0 * s) / s;
+                    self.text_mid(pm, Weight::Regular, sub, bx + bw / 2.0 - sw / 2.0, by + 31.0, 11.0, if on { ON_ACCENT } else { DIM });
+                    self.hot.push(Hot { id, x: bx, y: by, w: bw, h: 44.0 });
+                }
+            }
             Row::Button(id, title, desc, label, style) => {
                 card(self, pm, None);
                 self.title_desc(pm, title, desc, cx + 18.0, y, rh, cw - 190.0);
@@ -988,6 +1017,17 @@ impl Panel {
             Id::Sounds => s.sounds = !s.sounds,
             Id::PlayerVolume => s.player_volume = !s.player_volume,
             Id::DndQuiet => s.dnd_quiet = !s.dnd_quiet,
+            Id::Pack(n) => {
+                if s.sound_pack == n {
+                    return None;
+                }
+                s.sound_pack = n.min(3);
+                self.s = s.clone();
+                self.sync_preview();
+                // play a sample in the new style
+                self.preview.play_sound(crate::ui::Sound::Notify);
+                return Some(Act::Changed(s));
+            }
             Id::Theme(n) => {
                 if s.theme == n {
                     return None;

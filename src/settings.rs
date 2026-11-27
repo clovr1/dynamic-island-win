@@ -40,6 +40,8 @@ pub struct Settings {
     pub sounds: bool,
     /// 0..=100
     pub volume: u32,
+    /// which set of sounds: 0 Bloop, 1 Glass, 2 Wood, 3 Air
+    pub sound_pack: u8,
     /// a volume slider for the music in the open player
     pub player_volume: bool,
 }
@@ -65,6 +67,7 @@ impl Default for Settings {
             dnd_quiet: true,
             sounds: true,
             volume: 30,
+            sound_pack: 0,
             player_volume: true,
         }
     }
@@ -115,6 +118,7 @@ impl Settings {
                 "status_pills" => s.status_pills = parse_bool(v).unwrap_or(s.status_pills),
                 "sounds" => s.sounds = parse_bool(v).unwrap_or(s.sounds),
                 "player_volume" => s.player_volume = parse_bool(v).unwrap_or(s.player_volume),
+                "sound_pack" => s.sound_pack = v.trim().parse().unwrap_or(0),
                 "volume" => s.volume = v.trim().parse().unwrap_or(30),
                 "dnd_quiet" => s.dnd_quiet = parse_bool(v).unwrap_or(s.dnd_quiet),
                 "theme" => s.theme = v.trim().parse().unwrap_or(0),
@@ -131,6 +135,7 @@ impl Settings {
         self.speed_pct = self.speed_pct.clamp(50, 200);
         self.theme = self.theme.min(5);
         self.volume = self.volume.min(100);
+        self.sound_pack = self.sound_pack.min(3);
         // an "owner/repo" is letters, digits, - _ . and one slash; anything else is dropped
         let ok = self.update_repo.split('/').count() == 2 && self.update_repo.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c));
         if !ok {
@@ -144,7 +149,7 @@ impl Settings {
         format!(
             "# Bloop settings (you can edit this file; the island reads it when it starts)\n\
              show_music_pill = {}\nhide_when_player_front = {}\nnotifications = {}\nuse_bubble = {}\ncard_secs = {}\nlyrics_button = {}\n\
-             maximized = {}\nfullscreen_hide = {}\nscale_pct = {}\nspeed_pct = {}\naccent_eq = {}\ncheck_updates = {}\nupdate_repo = {}\ntheme = {}\nstatus_pills = {}\ndnd_quiet = {}\nsounds = {}\nvolume = {}\nplayer_volume = {}\n",
+             maximized = {}\nfullscreen_hide = {}\nscale_pct = {}\nspeed_pct = {}\naccent_eq = {}\ncheck_updates = {}\nupdate_repo = {}\ntheme = {}\nstatus_pills = {}\ndnd_quiet = {}\nsounds = {}\nvolume = {}\nplayer_volume = {}\nsound_pack = {}\n",
             b(self.show_music_pill),
             b(self.hide_when_player_front),
             b(self.notifications),
@@ -167,7 +172,8 @@ impl Settings {
             b(self.dnd_quiet),
             b(self.sounds),
             self.volume,
-            b(self.player_volume)
+            b(self.player_volume),
+            self.sound_pack
         )
     }
 }
