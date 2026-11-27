@@ -47,7 +47,7 @@ fn card_with_music_returns_to_pill() {
 }
 
 #[test]
-fn hovered_bubble_shrinks_back_into_the_bubble() {
+fn hovered_bubble_becomes_a_card_then_the_pill_without_the_player_popping_open() {
     let mut ui = Ui::new(1.0);
     ui.set_settings(&Settings::default());
     ui.set_media(MediaInfo { active: true, title: "A".into(), artist: "B".into(), playing: true, pos: 5.0, dur: 200.0 });
@@ -55,18 +55,41 @@ fn hovered_bubble_shrinks_back_into_the_bubble() {
     ui.push_notification(note());
     run(&mut ui, 1.0);
     assert_eq!(ui.mode(), Mode::Play, "a bubble beside the pill, not a card");
-    // hover the bubble: it grows into the card
+    // hover the bubble: it is absorbed into the card
     let (x, y, w, h) = ui.rect_px();
     ui.set_cursor(Some((x + w - 20.0, y + h / 2.0)));
     run(&mut ui, 1.5);
     assert_eq!(ui.mode(), Mode::Card);
-    // the mouse leaves: back to the small pill with the bubble
+    assert!(!ui.has_bubble(), "the bubble was absorbed");
+    // the mouse stays right where it is (the card stays while it is read, at most 25 s): then it ends, and the player must NOT open
+    run(&mut ui, 30.0);
+    assert_eq!(ui.mode(), Mode::Play, "back to the small pill (mouse still there)");
+    assert!(!ui.has_bubble());
+    // once the mouse has left and come back, hovering opens the player again
+    ui.set_cursor(None);
+    run(&mut ui, 1.0);
+    let (x, y, w, h) = ui.rect_px();
+    ui.set_cursor(Some((x + w / 2.0, y + h / 2.0)));
+    run(&mut ui, 1.0);
+    assert_eq!(ui.mode(), Mode::Open);
+}
+
+#[test]
+fn leaving_the_card_ends_it() {
+    let mut ui = Ui::new(1.0);
+    ui.set_settings(&Settings::default());
+    ui.set_media(MediaInfo { active: true, title: "A".into(), artist: "B".into(), playing: true, pos: 5.0, dur: 200.0 });
+    run(&mut ui, 1.0);
+    ui.push_notification(note());
+    run(&mut ui, 1.0);
+    let (x, y, w, h) = ui.rect_px();
+    ui.set_cursor(Some((x + w - 20.0, y + h / 2.0)));
+    run(&mut ui, 1.5);
+    assert_eq!(ui.mode(), Mode::Card);
     ui.set_cursor(None);
     run(&mut ui, 2.0);
-    assert_eq!(ui.mode(), Mode::Play);
-    assert!(ui.has_bubble(), "the bubble is back");
-    run(&mut ui, 6.0);
-    assert!(!ui.has_bubble(), "and then it goes away");
+    assert_eq!(ui.mode(), Mode::Play, "the small pill again, no bubble");
+    assert!(!ui.has_bubble());
 }
 
 #[test]

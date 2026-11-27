@@ -81,6 +81,13 @@ struct Notif {
 }
 
 /// One line of the notification list in the home view.
+/// A card that has just gone: it fades out while the island shrinks back (like the Electron version), instead of vanishing at once.
+struct Ghost {
+    n: Notif,
+    lines: Vec<String>,
+    since: f32,
+}
+
 struct LogEntry {
     n: Notif,
     at: Instant,
@@ -224,6 +231,9 @@ pub struct Ui {
     lyr_scroll: Tween,
     /// 0..1: the open player shows lyrics instead of the controls
     lyr_k: Tween,
+    /// 1 while the player is open, 0 otherwise: the open player's content only shows while the island is really "open" (a tall card
+    /// that shrinks back must not show it)
+    open_k: Tween,
     /// the line shown inside the small pill, and how wide the pill is for it
     line_text: String,
     line_w: f32,
@@ -267,6 +277,7 @@ pub struct Ui {
     open_block: bool,
     /// a click on the card unfolded its long message
     card_expanded: bool,
+    ghost: Option<Ghost>,
     card_lines: Vec<String>,
     gap: f32,
     bubble: Option<Bubble>,
@@ -418,6 +429,7 @@ impl Ui {
             lyr_since: 0.0,
             lyr_scroll: Tween::new(0.0),
             lyr_k: Tween::new(0.0),
+            open_k: Tween::new(0.0),
             line_text: String::new(),
             line_w: 240.0,
             notch_line_w: NOTCH_W,
@@ -448,6 +460,7 @@ impl Ui {
             clock: String::new(),
             open_block: false,
             card_expanded: false,
+            ghost: None,
             card_lines: Vec::new(),
             gap: 0.0,
             bubble: None,
@@ -462,14 +475,14 @@ impl Ui {
     }
 
     fn tweens_mut(&mut self) -> Vec<&mut Tween> {
-        let mut v: Vec<&mut Tween> = vec![&mut self.w, &mut self.h, &mut self.y, &mut self.rt, &mut self.rb, &mut self.tuck, &mut self.tuck_a, &mut self.shift, &mut self.bubble_k, &mut self.pad, &mut self.content, &mut self.lyr_scroll, &mut self.lyr_k, &mut self.press_pill, &mut self.track_k];
+        let mut v: Vec<&mut Tween> = vec![&mut self.w, &mut self.h, &mut self.y, &mut self.rt, &mut self.rb, &mut self.tuck, &mut self.tuck_a, &mut self.shift, &mut self.bubble_k, &mut self.pad, &mut self.content, &mut self.lyr_scroll, &mut self.lyr_k, &mut self.open_k, &mut self.press_pill, &mut self.track_k];
         v.extend(self.btn_hover.iter_mut());
         v.extend(self.btn_press.iter_mut());
         v
     }
 
     fn tweens(&self) -> Vec<&Tween> {
-        let mut v: Vec<&Tween> = vec![&self.w, &self.h, &self.y, &self.rt, &self.rb, &self.tuck, &self.tuck_a, &self.shift, &self.bubble_k, &self.pad, &self.content, &self.lyr_scroll, &self.lyr_k, &self.press_pill, &self.track_k];
+        let mut v: Vec<&Tween> = vec![&self.w, &self.h, &self.y, &self.rt, &self.rb, &self.tuck, &self.tuck_a, &self.shift, &self.bubble_k, &self.pad, &self.content, &self.lyr_scroll, &self.lyr_k, &self.open_k, &self.press_pill, &self.track_k];
         v.extend(self.btn_hover.iter());
         v.extend(self.btn_press.iter());
         v
@@ -483,7 +496,7 @@ impl Ui {
             self.lyrics_on = false;
         }
         if !s.notifications {
-            self.card = None;
+            self.end_card();
             self.bubble = None;
             self.queue.clear();
         }
@@ -714,7 +727,7 @@ impl Ui {
             self.bubble = None;
             self.queue.retain(|n| n.status.is_some());
             if self.card.as_ref().map(|c| c.n.status.is_none()).unwrap_or(false) {
-                self.card = None;
+                self.end_card();
             }
         }
     }
@@ -740,6 +753,14 @@ impl Ui {
     pub fn clear_log(&mut self) {
         self.log.clear();
         self.retarget();
+    }
+
+    /// The card is over: it fades out (see `Ghost`).
+    fn end_card(&mut self) {
+        if let Some(c) = self.card.take() {
+            let lines = if self.card_expanded { self.card_lines.clone() } else { Vec::new() };
+            self.ghost = Some(Ghost { n: c.n, lines, since: self.t });
+        }
     }
 
     /// A left click on the notification card: a long message unfolds (true). Short messages, or an already unfolded card: false (the
@@ -958,6 +979,11 @@ impl Ui {
         };
         self.pad.go(pad, self.t, 0.5, 0.0, SPRING);
         self.lyr_k.go(if self.lyr_view() { 1.0 } else { 0.0 }, self.t, 0.4, 0.0, EASE);
+        if self.mode() == Mode::Open {
+            self.open_k.jump(1.0);
+        } else {
+            self.open_k.go(0.0, self.t, 0.16, 0.0, EASE);
+        }
         let has_content = self.media.active && matches!(self.mode(), Mode::Play | Mode::Open);
         self.content.go(if has_content { 1.0 } else { 0.0 }, self.t, 0.25, 0.0, EASE);
         // growing uses the bouncy curves; shrinking is "sucked in" (ease in, out, faster)
@@ -1061,8 +1087,11 @@ impl Ui {
             _ => (false, false),
         };
 
+        // while a card is up and the mouse is on it, the player must not pop open when the card ends
+        if self.card.is_some() && over_pill {
+            self.open_block = true;
+        }
         // notification countdowns
-        let music = self.media.active && self.media.playing && !self.pf() && self.cfg.show_music_pill && self.cfg.use_bubble;
         if let Some(c) = &mut self.card {
             if over_pill {
                 c.left = c.left.max(1.4); // reading it: it stays
@@ -1071,12 +1100,12 @@ impl Ui {
             }
             c.age += dt;
             c.away = if over_pill { 0.0 } else { c.away + dt };
-            if c.from_bubble && c.away > 0.8 && music && c.age < 25.0 {
-                // the mouse left: the card shrinks back into the small bubble beside the music pill
-                let c = self.card.take().unwrap();
-                self.bubble = Some(Bubble { n: c.n, left: 3.5, hover: 0.0 });
-            } else if c.left <= 0.0 || c.age > 25.0 {
-                self.card = None;
+            if c.from_bubble && c.away > 0.8 {
+                // it grew out of the bubble and the mouse has left: it is over, back to the small pill
+                c.left = 0.0;
+            }
+            if c.left <= 0.0 || c.age > 25.0 {
+                self.end_card();
                 self.gap = 0.6;
             }
         } else if self.gap > 0.0 {
@@ -1356,13 +1385,19 @@ impl Ui {
 
     /// Dismiss the card (after a click).
     pub fn dismiss_card(&mut self) {
-        self.card = None;
+        if self.cursor.is_some() {
+            self.open_block = true; // the player must not pop open under the cursor
+        }
+        self.end_card();
         self.gap = 0.3;
         self.retarget();
     }
 
     /// Opened the source app from the bubble / card.
     pub fn dismiss_bubble(&mut self) {
+        if self.cursor.is_some() {
+            self.open_block = true;
+        }
         self.bubble = None;
         self.retarget();
     }
@@ -1480,14 +1515,32 @@ impl Ui {
             let a = smooth((w - 250.0) / 100.0);
             // (borrowed fields are copied out first)
             let (name, title, body, icon, count) = (if card.n.app.is_empty() { card.n.title.clone() } else { card.n.app.clone() }, card.n.title.clone(), card.n.body.clone(), card.n.icon.clone(), card.n.count);
-            self.draw_card(x0, y0, w, h, a, &name, &title, &body, icon.as_deref(), count);
+            let lines = if self.card_expanded { self.card_lines.clone() } else { Vec::new() };
+            self.draw_card(x0, y0, w, h, a, &name, &title, &body, icon.as_deref(), count, &lines);
             return;
+        }
+        // a card that has just ended fades out while the island shrinks (and the music pill fades in)
+        if let Some(g) = self.ghost.take() {
+            let fade = clamp01(1.0 - (self.t - g.since) / 0.25);
+            if fade > 0.01 {
+                if let Some(st) = g.n.status.clone() {
+                    let a = smooth((w - 200.0) / 60.0) * fade;
+                    self.draw_status(x0, y0, w, h, a, &st);
+                } else {
+                    let a = smooth((w - 250.0) / 100.0) * fade;
+                    let name = if g.n.app.is_empty() { g.n.title.clone() } else { g.n.app.clone() };
+                    self.draw_card(x0, y0, w, h, a, &name, &g.n.title, &g.n.body, g.n.icon.as_deref(), g.n.count, &g.lines);
+                }
+                self.ghost = Some(g);
+            }
         }
 
         if self.media.active && self.content.x > 0.01 {
             // how open the player is comes from the HEIGHT: a wide pill that shows a lyric line is still the small pill
-            let p_open = smooth((h - 48.0) / 70.0);
-            let show = smooth((w - 112.0) / 24.0) * self.content.x;
+            let p_open = smooth((h - 48.0) / 70.0) * self.open_k.x;
+            // the music pill's cover and equalizer appear once the card that has just gone is faded out (no overlap)
+            let gate = self.ghost.as_ref().map(|g| smooth((self.t - g.since - 0.12) / 0.22)).unwrap_or(1.0);
+            let show = smooth((w - 112.0) / 24.0) * self.content.x * gate;
             // the album art is ONE element that grows from the small pill into the open player (like the iPhone)
             let ts = clamp01((h - 28.0) / 12.0); // notch -> small pill (by height: a wide notch showing a lyric is still a notch)
             let k = self.lyr_k.x;
@@ -1594,7 +1647,7 @@ impl Ui {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn draw_card(&mut self, x0: f32, y0: f32, w: f32, h: f32, a: f32, name: &str, title: &str, body: &str, icon: Option<&Icon>, count: u32) {
+    fn draw_card(&mut self, x0: f32, y0: f32, w: f32, h: f32, a: f32, name: &str, title: &str, body: &str, icon: Option<&Icon>, count: u32, lines: &[String]) {
         if a <= 0.01 {
             return;
         }
@@ -1608,8 +1661,7 @@ impl Ui {
         let title = self.fonts.fit(Weight::Semibold, title, 15.0 * s, max_w * s);
         let body = self.fonts.fit(Weight::Regular, body, 13.0 * s, max_w * s);
         self.fonts.draw(&mut self.pm, Weight::Semibold, &title, tx * s, (y0 + 32.0) * s, 15.0 * s, WHITE, a);
-        if self.card_lines.len() > 1 && h > 78.0 {
-            let lines = self.card_lines.clone();
+        if lines.len() > 1 && h > 78.0 {
             for (i, l) in lines.iter().enumerate() {
                 self.fonts.draw(&mut self.pm, Weight::Regular, l, tx * s, (y0 + 51.0 + 17.0 * i as f32) * s, 13.0 * s, [142, 142, 147], a);
             }
