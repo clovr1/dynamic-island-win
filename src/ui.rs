@@ -265,8 +265,8 @@ pub struct Ui {
     clock: String,
     /// the home view was closed by a click: stays closed until the mouse has left
     open_block: bool,
-    /// seconds the mouse has rested on the card (a long message then unfolds)
-    card_hold: f32,
+    /// a click on the card unfolded its long message
+    card_expanded: bool,
     card_lines: Vec<String>,
     gap: f32,
     bubble: Option<Bubble>,
@@ -447,7 +447,7 @@ impl Ui {
             status_since: 0.0,
             clock: String::new(),
             open_block: false,
-            card_hold: 0.0,
+            card_expanded: false,
             card_lines: Vec::new(),
             gap: 0.0,
             bubble: None,
@@ -742,9 +742,30 @@ impl Ui {
         self.retarget();
     }
 
+    /// A left click on the notification card: a long message unfolds (true). Short messages, or an already unfolded card: false (the
+    /// click then opens the app the notification came from).
+    pub fn card_click(&mut self) -> bool {
+        let Some(c) = self.card.as_ref().filter(|c| c.n.status.is_none()) else { return false };
+        if self.card_expanded {
+            return false;
+        }
+        let body = c.n.body.clone();
+        let lines = wrap(&mut self.fonts, &body, 13.0 * self.scale, (360.0 - 71.0 - 22.0) * self.scale);
+        if lines.len() < 2 {
+            return false;
+        }
+        self.card_lines = lines.into_iter().take(5).collect();
+        self.card_expanded = true;
+        if let Some(c) = &mut self.card {
+            c.left = c.left.max(self.cfg.card_secs as f32 + 4.0);
+        }
+        self.retarget();
+        true
+    }
+
     /// How much taller the card is while a long message is unfolded.
     fn card_extra(&self) -> f32 {
-        if self.card_hold > 0.35 && self.card_lines.len() > 1 {
+        if self.card_expanded && self.card_lines.len() > 1 {
             17.0 * (self.card_lines.len() - 1) as f32
         } else {
             0.0
@@ -838,6 +859,8 @@ impl Ui {
             c.n = n;
             c.n.count = count;
             c.left = self.cfg.card_secs as f32;
+            self.card_expanded = false;
+            self.card_lines.clear();
         } else if let Some(last) = { self.bubble = None; self.queue.back_mut() }.filter(|q| q.app == n.app) {
             let count = last.count + 1;
             *last = n;
@@ -1077,17 +1100,9 @@ impl Ui {
             }
         }
 
-        // a long message unfolds while the mouse rests on its card
-        let readable = self.card.as_ref().map(|c| c.n.status.is_none()).unwrap_or(false);
-        self.card_hold = if readable && over_pill { self.card_hold + dt } else { 0.0 };
-        if readable && self.card_hold > 0.35 && self.card_lines.is_empty() {
-            let body = self.card.as_ref().map(|c| c.n.body.clone()).unwrap_or_default();
-            let lines = wrap(&mut self.fonts, &body, 13.0 * self.scale, (360.0 - 71.0 - 22.0) * self.scale);
-            if lines.len() > 1 {
-                self.card_lines = lines.into_iter().take(5).collect();
-            }
-        }
-        if !self.card_lines.is_empty() && (!readable || (self.card_hold == 0.0 && self.h.x < 74.0)) {
+        // an unfolded card goes back to normal when it goes away
+        if self.card.as_ref().map(|c| c.n.status.is_some()).unwrap_or(true) {
+            self.card_expanded = false;
             self.card_lines.clear();
         }
         // hovering opens the player after a short moment; leaving closes it after a longer one (a flick of the mouse does nothing)

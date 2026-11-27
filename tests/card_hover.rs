@@ -70,20 +70,28 @@ fn hovered_bubble_shrinks_back_into_the_bubble() {
 }
 
 #[test]
-fn long_message_unfolds_while_hovered() {
+fn long_message_unfolds_on_click() {
     let mut ui = Ui::new(1.0);
     ui.set_settings(&Settings::default());
     let long = "Dinner at 7 tonight, don't be late. I made your favourite and everyone is already waiting for you.";
     ui.push_notification(NotifData { app: "Messages".into(), aumid: String::new(), title: "Mum".into(), body: long.into(), icon: None });
     run(&mut ui, 1.0);
     let (_, _, _, h0) = ui.rect_px();
+    // hovering alone does not unfold it
     let (x, y, w, h) = ui.rect_px();
     ui.set_cursor(Some((x + w / 2.0, y + h / 2.0)));
     run(&mut ui, 1.5);
-    let (_, _, _, h1) = ui.rect_px();
-    assert!(h1 > h0 + 15.0, "unfolded: {h0} -> {h1}");
-    ui.set_cursor(None);
+    assert!(ui.rect_px().3 < h0 + 5.0, "no unfolding without a click");
+    // the first click unfolds, the second one is for the app
+    assert!(ui.card_click(), "the click unfolded it");
     run(&mut ui, 1.2);
-    let (_, _, _, h2) = ui.rect_px();
-    assert!(h2 < h1 - 10.0 || ui.mode() != Mode::Card, "folds back or goes away");
+    let h1 = ui.rect_px().3;
+    assert!(h1 > h0 + 15.0, "unfolded: {h0} -> {h1}");
+    assert!(!ui.card_click(), "a second click opens the app");
+    // a short message is never unfolded: the click opens the app
+    let mut ui2 = Ui::new(1.0);
+    ui2.set_settings(&Settings::default());
+    ui2.push_notification(NotifData { app: "Mail".into(), aumid: String::new(), title: "Nova".into(), body: "Hi".into(), icon: None });
+    run(&mut ui2, 1.0);
+    assert!(!ui2.card_click());
 }

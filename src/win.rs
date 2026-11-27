@@ -356,6 +356,8 @@ impl App {
             let _ = ReleaseCapture();
         }
         match self.ui.mouse_up(x, y) {
+            // a long message unfolds on the first click; the next click (or a short message) opens the app
+            Hit::Card(_) if self.ui.card_click() => {}
             Hit::Card(aumid) => {
                 self.ui.dismiss_card();
                 if aumid == UPDATE_AUMID {

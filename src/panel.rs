@@ -672,7 +672,7 @@ impl Panel {
             let tw = self.fonts.measure(Weight::Regular, t, 12.5 * s);
             self.fonts.draw(&mut st, Weight::Regular, t, (pw as f32) / 2.0 - tw / 2.0, ph as f32 / 2.0, 12.5 * s, [150, 150, 160], 1.0);
         }
-        let hint = "Live preview - hover the island, press its buttons, rest on a long notification";
+        let hint = "Live preview - hover the island, press its buttons, click a long notification to unfold it";
         self.fonts.draw(&mut st, Weight::Regular, hint, 14.0 * s, (h - 12.0) * s, 11.5 * s, [120, 122, 134], 1.0);
         // the rounded corners: only the four corner squares need the mask
         if let Some(m) = &self.stage_mask {
@@ -935,7 +935,11 @@ impl Panel {
             let (px, py) = (x - self.canvas_at.0, y - self.canvas_at.1);
             match self.preview.mouse_up(px, py) {
                 Hit::PlayPause => self.preview.toggle_playing_locally(),
-                Hit::Card(_) => self.preview.dismiss_card(),
+                Hit::Card(_) => {
+                    if !self.preview.card_click() {
+                        self.preview.dismiss_card();
+                    }
+                }
                 Hit::Bubble => self.preview.dismiss_bubble(),
                 Hit::LyricsToggle => {
                     self.preview.toggle_lyrics();
