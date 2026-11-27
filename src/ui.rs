@@ -265,6 +265,9 @@ pub struct Ui {
     clock: String,
     /// the home view was closed by a click: stays closed until the mouse has left
     open_block: bool,
+    /// seconds the mouse has rested on the card (a long message then unfolds)
+    card_hold: f32,
+    card_lines: Vec<String>,
     gap: f32,
     bubble: Option<Bubble>,
     t: f32,
@@ -444,6 +447,8 @@ impl Ui {
             status_since: 0.0,
             clock: String::new(),
             open_block: false,
+            card_hold: 0.0,
+            card_lines: Vec::new(),
             gap: 0.0,
             bubble: None,
             t: 0.0,
@@ -737,6 +742,20 @@ impl Ui {
         self.retarget();
     }
 
+    /// How much taller the card is while a long message is unfolded.
+    fn card_extra(&self) -> f32 {
+        if self.card_hold > 0.35 && self.card_lines.len() > 1 {
+            17.0 * (self.card_lines.len() - 1) as f32
+        } else {
+            0.0
+        }
+    }
+
+    /// Forget which notifications were seen lately (the preview in the settings window repeats the same ones).
+    pub fn forget_recent(&mut self) {
+        self.recent.clear();
+    }
+
     fn home_h(&self) -> f32 {
         let n = self.log.len().min(3);
         if n > 0 { 66.0 + 44.0 * n as f32 } else { 112.0 }
@@ -906,8 +925,8 @@ impl Ui {
             Mode::Open => (400.0, self.open_height(), TOP, 42.0, 42.0),
             Mode::Card if status && hang => (272.0, 48.0, 0.0, 0.0, 22.0),
             Mode::Card if status => (272.0, 44.0, TOP, 22.0, 22.0),
-            Mode::Card if hang => (360.0, 74.0, 0.0, 0.0, 30.0),
-            Mode::Card => (360.0, 70.0, TOP, 35.0, 35.0),
+            Mode::Card if hang => (360.0, 74.0 + self.card_extra(), 0.0, 0.0, 30.0),
+            Mode::Card => (360.0, 70.0 + self.card_extra(), TOP, 35.0, 35.0),
         };
         let pad = match (hang, self.mode()) {
             (true, Mode::Open) => 10.0,
@@ -1058,6 +1077,19 @@ impl Ui {
             }
         }
 
+        // a long message unfolds while the mouse rests on its card
+        let readable = self.card.as_ref().map(|c| c.n.status.is_none()).unwrap_or(false);
+        self.card_hold = if readable && over_pill { self.card_hold + dt } else { 0.0 };
+        if readable && self.card_hold > 0.35 && self.card_lines.is_empty() {
+            let body = self.card.as_ref().map(|c| c.n.body.clone()).unwrap_or_default();
+            let lines = wrap(&mut self.fonts, &body, 13.0 * self.scale, (360.0 - 71.0 - 22.0) * self.scale);
+            if lines.len() > 1 {
+                self.card_lines = lines.into_iter().take(5).collect();
+            }
+        }
+        if !self.card_lines.is_empty() && (!readable || (self.card_hold == 0.0 && self.h.x < 74.0)) {
+            self.card_lines.clear();
+        }
         // hovering opens the player after a short moment; leaving closes it after a longer one (a flick of the mouse does nothing)
         if !over_pill {
             self.open_block = false;
@@ -1345,7 +1377,12 @@ impl Ui {
         let (px, py, _, ph) = self.pill_rect();
         let (pcx, pcy) = ((px + self.w.x / 2.0) * s, (py + ph / 2.0) * s);
         let t = t.pre_concat(Transform::from_row(pr, 0.0, 0.0, pr, pcx - pcx * pr, pcy - pcy * pr));
-        self.out.draw_pixmap(0, 0, self.pm.as_ref(), &paint, t, None);
+        if sc == 1.0 && pr == 1.0 && paint.opacity >= 0.999 {
+            // nothing moves the whole island (the usual case): the picture is simply copied
+            self.out.data_mut().copy_from_slice(self.pm.data());
+        } else {
+            self.out.draw_pixmap(0, 0, self.pm.as_ref(), &paint, t, None);
+        }
         &self.out
     }
 
@@ -1547,7 +1584,6 @@ impl Ui {
             return;
         }
         let s = self.scale;
-        let _ = h;
         self.draw_icon(icon, name, x0 + 16.0, y0 + 14.0, 42.0, 11.0, a);
         let tx = x0 + 71.0;
         let label = if count > 1 { format!("+{}", count - 1) } else { "now".to_string() };
@@ -1557,7 +1593,14 @@ impl Ui {
         let title = self.fonts.fit(Weight::Semibold, title, 15.0 * s, max_w * s);
         let body = self.fonts.fit(Weight::Regular, body, 13.0 * s, max_w * s);
         self.fonts.draw(&mut self.pm, Weight::Semibold, &title, tx * s, (y0 + 32.0) * s, 15.0 * s, WHITE, a);
-        self.fonts.draw(&mut self.pm, Weight::Regular, &body, tx * s, (y0 + 51.0) * s, 13.0 * s, [142, 142, 147], a);
+        if self.card_lines.len() > 1 && h > 78.0 {
+            let lines = self.card_lines.clone();
+            for (i, l) in lines.iter().enumerate() {
+                self.fonts.draw(&mut self.pm, Weight::Regular, l, tx * s, (y0 + 51.0 + 17.0 * i as f32) * s, 13.0 * s, [142, 142, 147], a);
+            }
+        } else {
+            self.fonts.draw(&mut self.pm, Weight::Regular, &body, tx * s, (y0 + 51.0) * s, 13.0 * s, [142, 142, 147], a);
+        }
         self.fonts.draw(&mut self.pm, Weight::Regular, &label, (x0 + w - 20.0) * s - lw, (y0 + 27.0) * s, 12.0 * s, [99, 99, 102], a);
     }
 

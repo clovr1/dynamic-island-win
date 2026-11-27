@@ -68,3 +68,22 @@ fn hovered_bubble_shrinks_back_into_the_bubble() {
     run(&mut ui, 6.0);
     assert!(!ui.has_bubble(), "and then it goes away");
 }
+
+#[test]
+fn long_message_unfolds_while_hovered() {
+    let mut ui = Ui::new(1.0);
+    ui.set_settings(&Settings::default());
+    let long = "Dinner at 7 tonight, don't be late. I made your favourite and everyone is already waiting for you.";
+    ui.push_notification(NotifData { app: "Messages".into(), aumid: String::new(), title: "Mum".into(), body: long.into(), icon: None });
+    run(&mut ui, 1.0);
+    let (_, _, _, h0) = ui.rect_px();
+    let (x, y, w, h) = ui.rect_px();
+    ui.set_cursor(Some((x + w / 2.0, y + h / 2.0)));
+    run(&mut ui, 1.5);
+    let (_, _, _, h1) = ui.rect_px();
+    assert!(h1 > h0 + 15.0, "unfolded: {h0} -> {h1}");
+    ui.set_cursor(None);
+    run(&mut ui, 1.2);
+    let (_, _, _, h2) = ui.rect_px();
+    assert!(h2 < h1 - 10.0 || ui.mode() != Mode::Card, "folds back or goes away");
+}

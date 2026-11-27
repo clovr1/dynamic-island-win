@@ -101,18 +101,23 @@ impl Win {
                 let _ = DwmSetWindowAttribute(self.hwnd, DWMWINDOWATTRIBUTE(35), &tc.1 as *const u32 as *const c_void, 4);
             }
         }
-        let pm = self.panel.render();
+        let (pm, (rx, ry, rw, rh)) = self.panel.frame();
         let (pw, ph) = (pm.width() as i32, pm.height() as i32);
         unsafe {
+            // only the rows that changed are converted and shown
             let dst = std::slice::from_raw_parts_mut(self.bits, (pw * ph * 4) as usize);
-            for (d, s) in dst.chunks_exact_mut(4).zip(pm.data().chunks_exact(4)) {
-                d[0] = s[2];
-                d[1] = s[1];
-                d[2] = s[0];
-                d[3] = 255;
+            let src = pm.data();
+            for row in ry..(ry + rh).min(ph) {
+                let (a, b) = (((row * pw + rx) * 4) as usize, ((row * pw + (rx + rw).min(pw)) * 4) as usize);
+                for (d, s) in dst[a..b].chunks_exact_mut(4).zip(src[a..b].chunks_exact(4)) {
+                    d[0] = s[2];
+                    d[1] = s[1];
+                    d[2] = s[0];
+                    d[3] = 255;
+                }
             }
             let wdc = GetDC(self.hwnd);
-            let _ = BitBlt(wdc, 0, 0, pw, ph, self.dc, 0, 0, SRCCOPY);
+            let _ = BitBlt(wdc, rx, ry, rw, rh, self.dc, rx, ry, SRCCOPY);
             ReleaseDC(self.hwnd, wdc);
         }
         // the live island and the sliding switches need a timer (60 fps while something moves fast, 30 fps for the equalizer ...)

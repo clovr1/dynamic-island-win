@@ -154,6 +154,12 @@ pub struct Panel {
     preview_hand: bool,
     preview_down: bool,
     status_n: usize,
+    notif_n: usize,
+    /// everything must be drawn again (otherwise only the live island moves)
+    needs_full: bool,
+    stage_pm: Option<Pixmap>,
+    stage_bg: Option<Pixmap>,
+    stage_mask: Option<Mask>,
 }
 
 /// A made-up song for the preview (a gradient cover, so the equalizer takes its colour from it).
@@ -178,6 +184,39 @@ const SAMPLE_LRC: &str = "[00:30.00]Streetlights are counting down\n[00:36.00]Wi
 
 fn rr(pm: &mut Pixmap, s: f32, x: f32, y: f32, w: f32, h: f32, r: f32, rgb: [u8; 3], a: f32) {
     fill_rrect(pm, x * s, y * s, w * s, h * s, [r * s; 4], rgb, a);
+}
+
+/// Put `src` (premultiplied) over `dst` at (dx, dy): transparent pixels are skipped, solid ones copied, the rest blended.
+/// (A plain loop: much faster than the general drawing routine for big pictures.)
+fn blit_over(dst: &mut Pixmap, src: &Pixmap, dx: i32, dy: i32) {
+    let (dw, dh) = (dst.width() as i32, dst.height() as i32);
+    let (sw, sh) = (src.width() as i32, src.height() as i32);
+    let x0 = dx.max(0);
+    let x1 = (dx + sw).min(dw);
+    if x1 <= x0 {
+        return;
+    }
+    let sdata = src.data();
+    let ddata = dst.data_mut();
+    for y in dy.max(0)..(dy + sh).min(dh) {
+        let srow = (((y - dy) * sw + (x0 - dx)) * 4) as usize;
+        let drow = ((y * dw + x0) * 4) as usize;
+        let n = ((x1 - x0) * 4) as usize;
+        for (d, s) in ddata[drow..drow + n].chunks_exact_mut(4).zip(sdata[srow..srow + n].chunks_exact(4)) {
+            let a = s[3] as u32;
+            if a == 0 {
+                continue;
+            }
+            if a == 255 {
+                d.copy_from_slice(s);
+            } else {
+                let inv = 255 - a;
+                for k in 0..4 {
+                    d[k] = (s[k] as u32 + (d[k] as u32 * inv + 127) / 255).min(255) as u8;
+                }
+            }
+        }
+    }
 }
 
 fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
@@ -222,6 +261,11 @@ impl Panel {
             preview_hand: false,
             preview_down: false,
             status_n: 0,
+            notif_n: 0,
+            needs_full: true,
+            stage_pm: None,
+            stage_bg: None,
+            stage_mask: None,
         };
         p.status = format!("Updates come from github.com/{}", p.s.update_repo);
         p.resize(size_px.0, size_px.1);
@@ -266,16 +310,21 @@ impl Panel {
     }
 
     fn demo_notification(&mut self) {
-        let who = [("Alex", "Are we still on for tonight?"), ("Mum", "Dinner at 7, don't be late"), ("Nova", "Your build finished: 0 errors")];
-        let n = (self.preview_pct as usize + self.s.card_secs as usize) % who.len();
-        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as usize).unwrap_or(0);
-        let (name, text) = who[(t / 1000 + n) % who.len()];
-        self.preview.push_notification(NotifData { app: "Messages".into(), aumid: String::new(), title: name.into(), body: format!("{text}{}", " ".repeat(t % 40)), icon: None });
+        let who = [
+            ("Alex", "Are we still on for tonight?"),
+            ("Mum", "Dinner at 7 tonight, don't be late. I made your favourite and everyone is already waiting for you."),
+            ("Nova", "Your build finished: 0 errors, 2 warnings. Tap to see the full log and the list of changed files."),
+        ];
+        self.notif_n += 1;
+        let (name, text) = who[self.notif_n % who.len()];
+        self.preview.forget_recent();
+        self.preview.push_notification(NotifData { app: "Messages".into(), aumid: String::new(), title: name.into(), body: text.into(), icon: None });
     }
 
     /// The window changed size.
     pub fn resize(&mut self, w_px: u32, h_px: u32) {
         let (w_px, h_px) = (w_px.max(2), h_px.max(2));
+        self.needs_full = true;
         if let Some(pm) = Pixmap::new(w_px, h_px) {
             self.pm = pm;
             self.w = w_px as f32 / self.scale;
@@ -288,6 +337,7 @@ impl Panel {
     }
 
     pub fn set_settings(&mut self, s: Settings, autostart: bool) {
+        self.needs_full = true;
         self.saved = s.clone();
         self.saved_autostart = autostart;
         self.s = s;
@@ -306,6 +356,7 @@ impl Panel {
 
     /// The draft was applied: it is now what the running island has.
     pub fn mark_saved(&mut self) {
+        self.needs_full = true;
         self.saved = self.s.clone();
         self.saved_autostart = self.autostart;
     }
@@ -317,17 +368,20 @@ impl Panel {
     }
 
     pub fn set_page(&mut self, page: u8) {
+        self.needs_full = true;
         self.page = page.min(PAGES.len() as u8 - 1);
         self.scroll = 0.0;
     }
 
     pub fn set_status(&mut self, text: &str, ready: bool) {
+        self.needs_full = true;
         self.status = text.to_string();
         self.ready = ready;
         self.busy = false;
     }
 
     pub fn set_busy(&mut self, text: &str) {
+        self.needs_full = true;
         self.status = text.to_string();
         self.busy = true;
     }
@@ -401,6 +455,9 @@ impl Panel {
                 moving = true;
             }
         }
+        if moving {
+            self.needs_full = true;
+        }
         let need = self.preview.tick(dt);
         self.feed_lyrics();
         moving || need != Need::Rest
@@ -435,7 +492,29 @@ impl Panel {
     }
 
     #[allow(non_snake_case, unused_variables)]
+    /// The next picture: the whole window when something changed, otherwise only the live island's box. Gives the box that changed.
+    pub fn frame(&mut self) -> (&Pixmap, (i32, i32, i32, i32)) {
+        if self.needs_full || self.stage.2 == 0.0 {
+            let (w, h) = self.size_px();
+            return (self.render(), (0, 0, w as i32, h as i32));
+        }
+        let s = self.scale;
+        let (x, y, w, h) = self.stage;
+        let mut pm = std::mem::replace(&mut self.pm, Pixmap::new(1, 1).unwrap());
+        let bg = self.pal().page_bg;
+        rr(&mut pm, s, x - 2.0, y - 2.0, w + 4.0, h + 4.0, 0.0, bg, 1.0);
+        self.draw_stage(&mut pm, x, y, w, h);
+        let (pw, ph) = (pm.width() as i32, pm.height() as i32);
+        self.pm = pm;
+        let rx = ((x - 2.0) * s).floor().max(0.0) as i32;
+        let ry = ((y - 2.0) * s).floor().max(0.0) as i32;
+        let rw = (((w + 4.0) * s).ceil() as i32).min(pw - rx);
+        let rh = (((h + 4.0) * s).ceil() as i32).min(ph - ry);
+        (&self.pm, (rx, ry, rw.max(1), rh.max(1)))
+    }
+
     pub fn render(&mut self) -> &Pixmap {
+        self.needs_full = false;
         let pal = self.pal();
         let (WIN_BG, PAGE_BG, CARD, CARD_HOVER, EDGE, TEXT, DIM, ACCENT, ON_ACCENT, NAV_ON, NAV_HOVER) = (pal.win_bg, pal.page_bg, pal.card, pal.card_hover, pal.edge, pal.text, pal.dim, pal.accent, pal.on_accent, pal.nav_on, pal.nav_hover);
         let (BTN, TRACK) = (mix(pal.card, pal.text, 0.14), mix(pal.card, pal.text, 0.34));
@@ -543,49 +622,79 @@ impl Panel {
     }
 
     /// The live island: the real island, drawn with the settings as they are right now. Hover it, click its buttons, open the player.
+    /// It is drawn into its own small picture (with the wallpaper and the rounded corners made once), then placed in the window.
     fn draw_stage(&mut self, pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32) {
         let s = self.scale;
         self.stage = (x, y, w, h);
-        // the "screen": a dark wallpaper
-        if let Some(path) = crate::gfx::rrect(x * s, y * s, w * s, h * s, [10.0 * s; 4]) {
-            let mut paint = Paint::default();
-            paint.shader = LinearGradient::new(
-                Point::from_xy(0.0, y * s),
-                Point::from_xy(0.0, (y + h) * s),
-                vec![GradientStop::new(0.0, tiny_skia::Color::from_rgba8(30, 33, 48, 255)), GradientStop::new(1.0, tiny_skia::Color::from_rgba8(9, 9, 13, 255))],
-                SpreadMode::Pad,
-                Transform::identity(),
-            )
-            .unwrap_or(tiny_skia::Shader::SolidColor(tiny_skia::Color::BLACK));
-            paint.anti_alias = true;
-            pm.fill_path(&path, &paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
+        let (pw, ph) = ((w * s).round().max(1.0) as u32, (h * s).round().max(1.0) as u32);
+        if self.stage_pm.as_ref().map(|p| (p.width(), p.height())) != Some((pw, ph)) {
+            // (re)build: the wallpaper, the corner mask, the picture itself
+            let mut bg = Pixmap::new(pw, ph).unwrap();
+            let rect = crate::gfx::rrect(0.0, 0.0, pw as f32, ph as f32, [10.0 * s; 4]);
+            if let Some(path) = &rect {
+                let mut paint = Paint::default();
+                paint.shader = LinearGradient::new(
+                    Point::from_xy(0.0, 0.0),
+                    Point::from_xy(0.0, ph as f32),
+                    vec![GradientStop::new(0.0, tiny_skia::Color::from_rgba8(30, 33, 48, 255)), GradientStop::new(1.0, tiny_skia::Color::from_rgba8(9, 9, 13, 255))],
+                    SpreadMode::Pad,
+                    Transform::identity(),
+                )
+                .unwrap_or(tiny_skia::Shader::SolidColor(tiny_skia::Color::BLACK));
+                paint.anti_alias = true;
+                bg.fill_path(path, &paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
+            }
+            let mut mask = Mask::new(pw, ph);
+            if let (Some(m), Some(path)) = (mask.as_mut(), &rect) {
+                m.fill_path(path, tiny_skia::FillRule::Winding, true, Transform::identity());
+            }
+            self.stage_bg = Some(bg);
+            self.stage_mask = mask;
+            self.stage_pm = Pixmap::new(pw, ph);
         }
+        let (Some(mut st), Some(bg)) = (self.stage_pm.take(), self.stage_bg.as_ref()) else { return };
+        st.data_mut().copy_from_slice(bg.data());
         // a maximized window under the island
         if self.demo_max {
-            rr(pm, s, x, y, w, 34.0, 0.0, [52, 55, 70], 1.0);
-            rr(pm, s, x + 14.0, y + 14.0, 70.0, 7.0, 3.5, [90, 94, 112], 1.0);
+            rr(&mut st, s, 0.0, 0.0, w, 34.0, 0.0, [52, 55, 70], 1.0);
+            rr(&mut st, s, 14.0, 14.0, 70.0, 7.0, 3.5, [90, 94, 112], 1.0);
             for i in 0..3 {
-                rr(pm, s, x + w - 24.0 - i as f32 * 20.0, y + 12.0, 10.0, 10.0, 5.0, [90, 94, 112], 1.0);
+                rr(&mut st, s, w - 24.0 - i as f32 * 20.0, 12.0, 10.0, 10.0, 5.0, [90, 94, 112], 1.0);
             }
         }
         // (the stage's top edge is the top edge of the screen: the island's own picture starts there)
-        let (pw, _) = (self.preview.size_px().0 as f32, 0);
-        let (ox, oy) = (x * s + (w * s - pw) / 2.0, y * s);
-        self.canvas_at = (ox, oy);
-        let mut mask = Mask::new(pm.width(), pm.height());
-        if let (Some(m), Some(path)) = (mask.as_mut(), crate::gfx::rrect(x * s, y * s, w * s, h * s, [10.0 * s; 4])) {
-            m.fill_path(&path, tiny_skia::FillRule::Winding, true, Transform::identity());
-        }
         let island = self.preview.render();
-        pm.draw_pixmap(ox.round() as i32, oy.round() as i32, island.as_ref(), &PixmapPaint::default(), Transform::identity(), mask.as_ref());
+        let ox = ((pw as f32 - island.width() as f32) / 2.0).round();
+        blit_over(&mut st, island, ox as i32, 0);
+        self.canvas_at = (x * s + ox, y * s);
         if self.preview.is_hidden() {
             let t = "Hidden while a full-screen app is open (move the mouse to the top edge to peek)";
             let tw = self.fonts.measure(Weight::Regular, t, 12.5 * s);
-            self.fonts.draw(pm, Weight::Regular, t, (x + w / 2.0) * s - tw / 2.0, (y + h / 2.0) * s, 12.5 * s, [150, 150, 160], 1.0);
+            self.fonts.draw(&mut st, Weight::Regular, t, (pw as f32) / 2.0 - tw / 2.0, ph as f32 / 2.0, 12.5 * s, [150, 150, 160], 1.0);
         }
-        // a hint at the bottom edge
-        let hint = "Live preview - try it: hover the island, press its buttons";
-        self.fonts.draw(pm, Weight::Regular, hint, (x + 14.0) * s, (y + h - 12.0) * s, 11.5 * s, [120, 122, 134], 1.0);
+        let hint = "Live preview - hover the island, press its buttons, rest on a long notification";
+        self.fonts.draw(&mut st, Weight::Regular, hint, 14.0 * s, (h - 12.0) * s, 11.5 * s, [120, 122, 134], 1.0);
+        // the rounded corners: only the four corner squares need the mask
+        if let Some(m) = &self.stage_mask {
+            let cr = ((10.0 * s).ceil() as u32 + 2).min(pw / 2).min(ph / 2);
+            let md = m.data();
+            let sd = st.data_mut();
+            for (cx0, cy0) in [(0, 0), (pw - cr, 0), (0, ph - cr), (pw - cr, ph - cr)] {
+                for yy in cy0..cy0 + cr {
+                    for xx in cx0..cx0 + cr {
+                        let i = (yy * pw + xx) as usize;
+                        let a = md[i] as u32;
+                        if a < 255 {
+                            for k in 0..4 {
+                                sd[i * 4 + k] = ((sd[i * 4 + k] as u32 * a + 127) / 255) as u8;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        blit_over(pm, &st, (x * s).round() as i32, (y * s).round() as i32);
+        self.stage_pm = Some(st);
     }
 
     #[allow(non_snake_case, unused_variables)]
@@ -743,6 +852,9 @@ impl Panel {
     }
 
     pub fn leave(&mut self) {
+        if self.hover.is_some() {
+            self.needs_full = true;
+        }
         self.hover = None;
         self.preview.set_cursor(None);
         self.cursor_in = false;
@@ -765,7 +877,11 @@ impl Panel {
     }
 
     pub fn mouse_move(&mut self, x: f32, y: f32) -> Option<Act> {
+        let before = self.hover;
         self.hover = self.hit_at(x, y);
+        if before != self.hover || self.drag.is_some() {
+            self.needs_full = true;
+        }
         match self.in_stage(x, y) {
             Some((px, py)) => {
                 self.preview.set_cursor(Some((px, py)));
@@ -788,6 +904,7 @@ impl Panel {
     }
 
     pub fn mouse_down(&mut self, x: f32, y: f32) -> Option<Act> {
+        self.needs_full = true;
         let id = self.hit_at(x, y);
         self.hover = id;
         self.down = id;
@@ -812,6 +929,7 @@ impl Panel {
     }
 
     pub fn mouse_up(&mut self, x: f32, y: f32) -> Option<Act> {
+        self.needs_full = true;
         if self.preview_down {
             self.preview_down = false;
             let (px, py) = (x - self.canvas_at.0, y - self.canvas_at.1);
@@ -935,6 +1053,7 @@ impl Panel {
     }
 
     pub fn wheel(&mut self, notches: f32) {
+        self.needs_full = true;
         if self.cursor_in {
             self.preview.wheel(notches);
             return;
