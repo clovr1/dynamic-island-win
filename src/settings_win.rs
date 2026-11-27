@@ -25,7 +25,9 @@ struct Win {
     bmp: HBITMAP,
     bits: *mut u8,
     tracking: bool,
-    timer: bool,
+    timer: Option<u32>,
+    /// the title bar colours last given to Windows
+    title: (bool, u32),
     last: Instant,
 }
 
@@ -99,6 +101,15 @@ pub fn refresh(s: &Settings, autostart: bool) {
 impl Win {
     /// Draw the panel and show it in the window.
     fn draw(&mut self) {
+        let tc = self.panel.title_colors();
+        if tc != self.title {
+            self.title = tc;
+            unsafe {
+                let dark = BOOL(tc.0 as i32);
+                let _ = DwmSetWindowAttribute(self.hwnd, DWMWINDOWATTRIBUTE(20), &dark as *const BOOL as *const c_void, 4);
+                let _ = DwmSetWindowAttribute(self.hwnd, DWMWINDOWATTRIBUTE(35), &tc.1 as *const u32 as *const c_void, 4);
+            }
+        }
         let pm = self.panel.render();
         let (pw, ph) = (pm.width() as i32, pm.height() as i32);
         unsafe {
@@ -113,18 +124,23 @@ impl Win {
             let _ = BitBlt(wdc, 0, 0, pw, ph, self.dc, 0, 0, SRCCOPY);
             ReleaseDC(self.hwnd, wdc);
         }
-        // switches that are still sliding need a 60 fps timer
-        let moving = self.panel.animating();
-        if moving != self.timer {
+        // the live island and the sliding switches need a timer (60 fps while something moves fast, 30 fps for the equalizer ...)
+        let want = self.panel.frame_ms();
+        if want != self.timer {
             unsafe {
-                if moving {
-                    self.last = Instant::now();
-                    SetTimer(self.hwnd, TIMER_ANIM, 16, None);
-                } else {
-                    let _ = KillTimer(self.hwnd, TIMER_ANIM);
+                match want {
+                    Some(ms) => {
+                        if self.timer.is_none() {
+                            self.last = Instant::now();
+                        }
+                        SetTimer(self.hwnd, TIMER_ANIM, ms, None);
+                    }
+                    None => {
+                        let _ = KillTimer(self.hwnd, TIMER_ANIM);
+                    }
                 }
             }
-            self.timer = moving;
+            self.timer = want;
         }
     }
 }
@@ -211,7 +227,7 @@ pub fn open(current: &Settings, autostart: bool, icon: Option<HICON>) {
             return;
         };
         SelectObject(dc, bmp);
-        WIN.with(|w| *w.borrow_mut() = Some(Win { hwnd, panel, dc, bmp, bits, tracking: false, timer: false, last: Instant::now() }));
+        WIN.with(|w| *w.borrow_mut() = Some(Win { hwnd, panel, dc, bmp, bits, tracking: false, timer: None, title: (true, 0), last: Instant::now() }));
         with_win(|w| w.draw());
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = SetForegroundWindow(hwnd);

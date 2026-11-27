@@ -3,20 +3,39 @@
 
 use crate::gfx::{fill_rrect, Fonts, Weight};
 use crate::settings::{MaxMode, Settings};
-use tiny_skia::{Color, Pixmap};
+use crate::lyrics::{parse_lrc, Found};
+use crate::ui::{ArtData, Env, Hit, MediaInfo, Need, NotifData, Ui};
+use tiny_skia::{Color, GradientStop, LinearGradient, Mask, Paint, Pixmap, PixmapPaint, Point, SpreadMode, Transform};
 
 /// width of the list of pages (logical pixels)
 const SIDE: f32 = 224.0;
-const WIN_BG: [u8; 3] = [32, 32, 32];
-const PAGE_BG: [u8; 3] = [39, 39, 39];
-const CARD: [u8; 3] = [49, 49, 49];
-const CARD_HOVER: [u8; 3] = [55, 55, 55];
-const EDGE: [u8; 3] = [64, 64, 64];
-const TEXT: [u8; 3] = [255, 255, 255];
-const DIM: [u8; 3] = [166, 166, 166];
-const ACCENT: [u8; 3] = [96, 205, 255];
-const NAV_ON: [u8; 3] = [55, 55, 55];
-const NAV_HOVER: [u8; 3] = [45, 45, 45];
+/// The colours of one theme.
+#[derive(Clone, Copy)]
+pub struct Palette {
+    pub name: &'static str,
+    pub win_bg: [u8; 3],
+    pub page_bg: [u8; 3],
+    pub card: [u8; 3],
+    pub card_hover: [u8; 3],
+    pub edge: [u8; 3],
+    pub text: [u8; 3],
+    pub dim: [u8; 3],
+    pub accent: [u8; 3],
+    /// text on top of the accent colour
+    pub on_accent: [u8; 3],
+    pub nav_on: [u8; 3],
+    pub nav_hover: [u8; 3],
+    pub light: bool,
+}
+
+pub const THEMES: [Palette; 6] = [
+    Palette { name: "Midnight", win_bg: [32, 32, 32], page_bg: [39, 39, 39], card: [49, 49, 49], card_hover: [55, 55, 55], edge: [64, 64, 64], text: [255, 255, 255], dim: [166, 166, 166], accent: [96, 205, 255], on_accent: [0, 0, 0], nav_on: [55, 55, 55], nav_hover: [45, 45, 45], light: false },
+    Palette { name: "Aurora", win_bg: [14, 27, 30], page_bg: [18, 34, 37], card: [25, 47, 50], card_hover: [31, 56, 60], edge: [42, 73, 77], text: [235, 255, 250], dim: [138, 176, 172], accent: [52, 226, 168], on_accent: [0, 28, 20], nav_on: [28, 52, 56], nav_hover: [22, 42, 46], light: false },
+    Palette { name: "Sunset", win_bg: [33, 24, 26], page_bg: [41, 30, 32], card: [55, 40, 42], card_hover: [64, 47, 49], edge: [82, 60, 62], text: [255, 244, 238], dim: [188, 156, 148], accent: [255, 140, 82], on_accent: [40, 14, 0], nav_on: [62, 45, 47], nav_hover: [50, 36, 38], light: false },
+    Palette { name: "Grape", win_bg: [26, 22, 38], page_bg: [32, 27, 47], card: [43, 36, 63], card_hover: [51, 43, 74], edge: [68, 59, 98], text: [246, 242, 255], dim: [164, 154, 196], accent: [182, 140, 255], on_accent: [24, 8, 52], nav_on: [50, 42, 74], nav_hover: [39, 33, 57], light: false },
+    Palette { name: "Rose", win_bg: [34, 22, 30], page_bg: [43, 28, 38], card: [58, 38, 51], card_hover: [68, 45, 60], edge: [88, 60, 78], text: [255, 240, 247], dim: [190, 152, 172], accent: [255, 112, 166], on_accent: [48, 4, 26], nav_on: [66, 44, 58], nav_hover: [52, 34, 46], light: false },
+    Palette { name: "Daylight", win_bg: [236, 238, 242], page_bg: [246, 247, 250], card: [255, 255, 255], card_hover: [240, 243, 250], edge: [218, 222, 232], text: [24, 28, 38], dim: [100, 108, 124], accent: [0, 103, 224], on_accent: [255, 255, 255], nav_on: [255, 255, 255], nav_hover: [226, 230, 238], light: true },
+];
 
 pub const PAGES: [&str; 6] = ["General", "Music", "Notifications", "Windows", "Look", "Updates"];
 
@@ -40,6 +59,11 @@ pub enum Id {
     CheckNow,
     Reset,
     Quit,
+    /// the little buttons under the preview
+    DemoNotif,
+    DemoMax,
+    DemoFs,
+    Theme(u8),
 }
 
 /// What the panel asks its window to do.
@@ -60,6 +84,8 @@ enum Row {
     Slider(Id, &'static str, &'static str, f32, f32, f32, String),
     /// title, description, chosen, options
     Radio(&'static str, &'static str, usize, [&'static str; 3]),
+    /// the theme picker: chosen
+    Themes(u8),
     /// id, title, description, button text, style (0 normal / 1 primary / 2 danger)
     Button(Id, &'static str, String, String, u8),
 }
@@ -71,6 +97,7 @@ impl Row {
             Row::Button(_, _, d, _, _) => if d.is_empty() { 56.0 } else { 68.0 },
             Row::Slider(..) => 72.0,
             Row::Radio(..) => 68.0 + 3.0 * 42.0,
+            Row::Themes(_) => 126.0,
         }
     }
 }
@@ -104,7 +131,38 @@ pub struct Panel {
     drag: Option<Id>,
     /// moving values (switch positions): id, now, target
     anim: Vec<(Id, f32, f32)>,
+    /// the live island at the top: the real island, with the settings applied to it
+    preview: Ui,
+    demo_max: bool,
+    demo_fs: bool,
+    preview_pct: u32,
+    /// where the preview stage is (logical) and where the island's own picture starts inside the window (physical)
+    stage: (f32, f32, f32, f32),
+    canvas_at: (f32, f32),
+    cursor_in: bool,
+    preview_hand: bool,
+    preview_down: bool,
 }
+
+/// A made-up song for the preview (a gradient cover, so the equalizer takes its colour from it).
+fn sample_art() -> ArtData {
+    let n = 96u32;
+    let mut rgba = Vec::with_capacity((n * n * 4) as usize);
+    for y in 0..n {
+        for x in 0..n {
+            let t = (x + y) as f32 / (2.0 * n as f32);
+            let (cx, cy) = (x as f32 - n as f32 * 0.68, y as f32 - n as f32 * 0.32);
+            let sun = (1.0 - ((cx * cx + cy * cy).sqrt() / (n as f32 * 0.22))).clamp(0.0, 1.0);
+            let r = 40.0 + 190.0 * t + 60.0 * sun;
+            let g = 30.0 + 60.0 * (1.0 - t) + 150.0 * sun;
+            let b = 150.0 - 90.0 * t;
+            rgba.extend_from_slice(&[r.min(255.0) as u8, g.min(255.0) as u8, b.min(255.0) as u8, 255]);
+        }
+    }
+    ArtData { w: n, h: n, rgba }
+}
+
+const SAMPLE_LRC: &str = "[00:30.00]Streetlights are counting down\n[00:36.00]Windows rolling, nobody's around\n[00:42.00]Every mile a little brighter\n[00:48.00]Every turn a little lighter\n[00:54.00]Take the long way home tonight\n[01:00.00]Keep the radio on low\n[01:06.00]Let the city fade to light\n[01:12.00]Nowhere else I want to go\n[01:20.00]Midnight drive\n[01:30.00]";
 
 fn rr(pm: &mut Pixmap, s: f32, x: f32, y: f32, w: f32, h: f32, r: f32, rgb: [u8; 3], a: f32) {
     fill_rrect(pm, x * s, y * s, w * s, h * s, [r * s; 4], rgb, a);
@@ -117,7 +175,7 @@ fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
 
 impl Panel {
     /// The default (and smallest) size of the window's inside, logical pixels.
-    pub const DEFAULT_SIZE: (f32, f32) = (900.0, 600.0);
+    pub const DEFAULT_SIZE: (f32, f32) = (920.0, 660.0);
     pub const MIN_SIZE: (f32, f32) = (700.0, 460.0);
 
     pub fn new(scale: f32, s: Settings, autostart: bool, size_px: (u32, u32)) -> Panel {
@@ -140,10 +198,51 @@ impl Panel {
             down: None,
             drag: None,
             anim: Vec::new(),
+            preview: Ui::new(scale),
+            demo_max: false,
+            demo_fs: false,
+            preview_pct: 100,
+            stage: (0.0, 0.0, 0.0, 0.0),
+            canvas_at: (0.0, 0.0),
+            cursor_in: false,
+            preview_hand: false,
+            preview_down: false,
         };
         p.status = format!("Updates come from github.com/{}", p.s.update_repo);
         p.resize(size_px.0, size_px.1);
+        p.start_preview();
         p
+    }
+
+    fn start_preview(&mut self) {
+        self.preview_pct = self.s.scale_pct;
+        self.preview.set_scale(self.scale * self.s.scale_pct as f32 / 100.0);
+        self.preview.set_settings(&self.s);
+        self.preview.set_art(Some(sample_art()));
+        self.preview.set_media(MediaInfo { active: true, title: "Midnight Drive".into(), artist: "The Islanders".into(), playing: true, pos: 52.0, dur: 214.0 });
+    }
+
+    fn sync_preview(&mut self) {
+        if self.preview_pct != self.s.scale_pct {
+            self.preview_pct = self.s.scale_pct;
+            self.preview.set_scale(self.scale * self.s.scale_pct as f32 / 100.0);
+        }
+        self.preview.set_settings(&self.s);
+        self.preview.set_env(Env { maximized: self.demo_max, fullscreen: self.demo_fs, ..Env::default() });
+    }
+
+    fn feed_lyrics(&mut self) {
+        if let Some(r) = self.preview.take_lyrics_request() {
+            self.preview.set_lyrics(&r.key, Some(Found { synced: true, lines: parse_lrc(SAMPLE_LRC) }));
+        }
+    }
+
+    fn demo_notification(&mut self) {
+        let who = [("Alex", "Are we still on for tonight?"), ("Mum", "Dinner at 7, don't be late"), ("Nova", "Your build finished: 0 errors")];
+        let n = (self.preview_pct as usize + self.s.card_secs as usize) % who.len();
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as usize).unwrap_or(0);
+        let (name, text) = who[(t / 1000 + n) % who.len()];
+        self.preview.push_notification(NotifData { app: "Messages".into(), aumid: String::new(), title: name.into(), body: format!("{text}{}", " ".repeat(t % 40)), icon: None });
     }
 
     /// The window changed size.
@@ -163,6 +262,7 @@ impl Panel {
     pub fn set_settings(&mut self, s: Settings, autostart: bool) {
         self.s = s;
         self.autostart = autostart;
+        self.sync_preview();
     }
 
     pub fn set_page(&mut self, page: u8) {
@@ -179,6 +279,16 @@ impl Panel {
     pub fn set_busy(&mut self, text: &str) {
         self.status = text.to_string();
         self.busy = true;
+    }
+
+    pub fn pal(&self) -> Palette {
+        THEMES[(self.s.theme as usize).min(THEMES.len() - 1)]
+    }
+
+    /// For the window's title bar: (dark?, colour as a Windows COLORREF 0x00BBGGRR).
+    pub fn title_colors(&self) -> (bool, u32) {
+        let c = self.pal().win_bg;
+        (!self.pal().light, (c[2] as u32) << 16 | (c[1] as u32) << 8 | c[0] as u32)
     }
 
     fn rows(&self) -> Vec<Row> {
@@ -206,6 +316,7 @@ impl Panel {
                 Row::Toggle(Id::FsHide, "Hide for full-screen apps", "Videos and games get the whole screen", s.fullscreen_hide),
             ],
             4 => vec![
+                Row::Themes(s.theme),
                 Row::Slider(Id::Scale, "Size", "Makes the whole island bigger or smaller", s.scale_pct as f32, 80.0, 140.0, format!("{} %", s.scale_pct)),
                 Row::Slider(Id::Speed, "Animation speed", "Slower is calmer, faster is snappier", s.speed_pct as f32, 50.0, 200.0, format!("{} %", s.speed_pct)),
             ],
@@ -225,7 +336,7 @@ impl Panel {
         }
     }
 
-    /// Moves the switches towards where they belong. True while something still moves.
+    /// Moves the switches (and the live island) forward. True while something still moves.
     pub fn tick(&mut self, dt: f32) -> bool {
         let mut moving = false;
         for a in self.anim.iter_mut() {
@@ -236,11 +347,21 @@ impl Panel {
                 moving = true;
             }
         }
-        moving
+        let need = self.preview.tick(dt);
+        self.feed_lyrics();
+        moving || need != Need::Rest
     }
 
-    pub fn animating(&self) -> bool {
-        self.anim.iter().any(|a| (a.2 - a.1).abs() > 0.001)
+    /// How soon the next picture is wanted (None: nothing moves).
+    pub fn frame_ms(&self) -> Option<u32> {
+        if self.anim.iter().any(|a| (a.2 - a.1).abs() > 0.001) {
+            return Some(16);
+        }
+        match self.preview.need() {
+            Need::Fast => Some(16),
+            Need::Slow => Some(33),
+            Need::Rest => None,
+        }
     }
 
     fn want(&mut self, id: Id, target: f32) -> f32 {
@@ -259,7 +380,11 @@ impl Panel {
         self.fonts.draw(pm, w, t, x * s, (cy + px * 0.36) * s, px * s, rgb, 1.0);
     }
 
+    #[allow(non_snake_case, unused_variables)]
     pub fn render(&mut self) -> &Pixmap {
+        let pal = self.pal();
+        let (WIN_BG, PAGE_BG, CARD, CARD_HOVER, EDGE, TEXT, DIM, ACCENT, ON_ACCENT, NAV_ON, NAV_HOVER) = (pal.win_bg, pal.page_bg, pal.card, pal.card_hover, pal.edge, pal.text, pal.dim, pal.accent, pal.on_accent, pal.nav_on, pal.nav_hover);
+        let (BTN, TRACK) = (mix(pal.card, pal.text, 0.14), mix(pal.card, pal.text, 0.34));
         let s = self.scale;
         let mut pm = std::mem::replace(&mut self.pm, Pixmap::new(1, 1).unwrap());
         pm.fill(Color::from_rgba8(PAGE_BG[0], PAGE_BG[1], PAGE_BG[2], 255));
@@ -291,15 +416,15 @@ impl Panel {
             if hov {
                 rr(&mut pm, s, x, y, bw, bh, 5.0, NAV_HOVER, 1.0);
             }
-            self.text_mid(&mut pm, Weight::Regular, "Quit Dynamic Island", x + 18.0, y + bh / 2.0, 14.0, [255, 138, 128]);
+            self.text_mid(&mut pm, Weight::Regular, "Quit Dynamic Island", x + 18.0, y + bh / 2.0, 14.0, if pal.light { [200, 40, 40] } else { [255, 138, 128] });
             self.hot.push(Hot { id: Id::Quit, x, y, w: bw, h: bh });
         }
 
         // ---- the settings of the page ----
         let cx = SIDE + 36.0;
         let cw = (w - SIDE - 72.0).clamp(300.0, 760.0);
-        self.fonts.draw(&mut pm, Weight::Semibold, PAGES[self.page as usize], cx * s, (60.0 - self.scroll) * s, 28.0 * s, TEXT, 1.0);
-        let mut y = 86.0 - self.scroll;
+        const ROWS_TOP: f32 = 296.0;
+        let mut y = ROWS_TOP - self.scroll;
         let rows = self.rows();
         for row in &rows {
             let rh = row.height();
@@ -309,18 +434,88 @@ impl Panel {
         let total = y + self.scroll + 20.0;
         self.max_scroll = (total - h).max(0.0);
         self.scroll = self.scroll.min(self.max_scroll);
+
+        // everything above the rows stays where it is: the live island, the title and the little buttons
+        rr(&mut pm, s, SIDE, 0.0, w - SIDE, ROWS_TOP - 8.0, 0.0, PAGE_BG, 1.0);
+        self.draw_stage(&mut pm, cx, 16.0, cw, 224.0);
+        self.fonts.draw(&mut pm, Weight::Semibold, PAGES[self.page as usize], cx * s, 276.0 * s, 24.0 * s, TEXT, 1.0);
+        // the buttons that make the preview show things
+        let mut bx = cx + cw;
+        for (id, label, on) in [(Id::DemoFs, "Full-screen app", self.demo_fs), (Id::DemoMax, "Maximized window", self.demo_max), (Id::DemoNotif, "Send notification", false)] {
+            let tw = self.fonts.measure(Weight::Semibold, label, 12.5 * s) / s;
+            let bw = tw + 26.0;
+            bx -= bw;
+            let hov = self.hover == Some(id);
+            let down = hov && self.down == Some(id);
+            let base = if on { ACCENT } else { BTN };
+            let col = if down { mix(base, [0, 0, 0], 0.22) } else if hov { mix(base, [255, 255, 255], 0.12) } else { base };
+            rr(&mut pm, s, bx, 250.0, bw, 28.0, 14.0, col, 1.0);
+            self.text_mid(&mut pm, Weight::Semibold, label, bx + 13.0, 264.0, 12.5, if on { ON_ACCENT } else { TEXT });
+            self.hot.push(Hot { id, x: bx, y: 250.0, w: bw, h: 28.0 });
+            bx -= 8.0;
+        }
         // a thin scroll bar
         if self.max_scroll > 0.0 {
-            let vh = h - 16.0;
-            let th = (vh * h / total).max(30.0);
-            let ty = 8.0 + (vh - th) * (self.scroll / self.max_scroll);
-            rr(&mut pm, s, w - 8.0, ty, 3.0, th, 1.5, [110, 110, 110], 0.9);
+            let vh = h - ROWS_TOP;
+            let th = (vh * (h - ROWS_TOP) / (total - ROWS_TOP)).max(30.0);
+            let ty = ROWS_TOP + (vh - th) * (self.scroll / self.max_scroll);
+            rr(&mut pm, s, w - 8.0, ty, 3.0, th, 1.5, TRACK, 0.9);
         }
         self.pm = pm;
         &self.pm
     }
 
+    /// The live island: the real island, drawn with the settings as they are right now. Hover it, click its buttons, open the player.
+    fn draw_stage(&mut self, pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32) {
+        let s = self.scale;
+        self.stage = (x, y, w, h);
+        // the "screen": a dark wallpaper
+        if let Some(path) = crate::gfx::rrect(x * s, y * s, w * s, h * s, [10.0 * s; 4]) {
+            let mut paint = Paint::default();
+            paint.shader = LinearGradient::new(
+                Point::from_xy(0.0, y * s),
+                Point::from_xy(0.0, (y + h) * s),
+                vec![GradientStop::new(0.0, tiny_skia::Color::from_rgba8(30, 33, 48, 255)), GradientStop::new(1.0, tiny_skia::Color::from_rgba8(9, 9, 13, 255))],
+                SpreadMode::Pad,
+                Transform::identity(),
+            )
+            .unwrap_or(tiny_skia::Shader::SolidColor(tiny_skia::Color::BLACK));
+            paint.anti_alias = true;
+            pm.fill_path(&path, &paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
+        }
+        // a maximized window under the island
+        if self.demo_max {
+            rr(pm, s, x, y, w, 34.0, 0.0, [52, 55, 70], 1.0);
+            rr(pm, s, x + 14.0, y + 14.0, 70.0, 7.0, 3.5, [90, 94, 112], 1.0);
+            for i in 0..3 {
+                rr(pm, s, x + w - 24.0 - i as f32 * 20.0, y + 12.0, 10.0, 10.0, 5.0, [90, 94, 112], 1.0);
+            }
+        }
+        // (the stage's top edge is the top edge of the screen: the island's own picture starts there)
+        let (pw, _) = (self.preview.size_px().0 as f32, 0);
+        let (ox, oy) = (x * s + (w * s - pw) / 2.0, y * s);
+        self.canvas_at = (ox, oy);
+        let mut mask = Mask::new(pm.width(), pm.height());
+        if let (Some(m), Some(path)) = (mask.as_mut(), crate::gfx::rrect(x * s, y * s, w * s, h * s, [10.0 * s; 4])) {
+            m.fill_path(&path, tiny_skia::FillRule::Winding, true, Transform::identity());
+        }
+        let island = self.preview.render();
+        pm.draw_pixmap(ox.round() as i32, oy.round() as i32, island.as_ref(), &PixmapPaint::default(), Transform::identity(), mask.as_ref());
+        if self.preview.is_hidden() {
+            let t = "Hidden while a full-screen app is open (move the mouse to the top edge to peek)";
+            let tw = self.fonts.measure(Weight::Regular, t, 12.5 * s);
+            self.fonts.draw(pm, Weight::Regular, t, (x + w / 2.0) * s - tw / 2.0, (y + h / 2.0) * s, 12.5 * s, [150, 150, 160], 1.0);
+        }
+        // a hint at the bottom edge
+        let hint = "Live preview - try it: hover the island, press its buttons";
+        self.fonts.draw(pm, Weight::Regular, hint, (x + 14.0) * s, (y + h - 12.0) * s, 11.5 * s, [120, 122, 134], 1.0);
+    }
+
+    #[allow(non_snake_case, unused_variables)]
     fn draw_row(&mut self, pm: &mut Pixmap, row: &Row, cx: f32, y: f32, cw: f32, rh: f32) {
+        let pal = self.pal();
+        let (WIN_BG, PAGE_BG, CARD, CARD_HOVER, EDGE, TEXT, DIM, ACCENT, ON_ACCENT, NAV_ON, NAV_HOVER) = (pal.win_bg, pal.page_bg, pal.card, pal.card_hover, pal.edge, pal.text, pal.dim, pal.accent, pal.on_accent, pal.nav_on, pal.nav_hover);
+        let (BTN, TRACK) = (mix(pal.card, pal.text, 0.14), mix(pal.card, pal.text, 0.34));
         let s = self.scale;
         let right = cx + cw - 18.0;
         let card = |me: &Self, pm: &mut Pixmap, id: Option<Id>| {
@@ -338,13 +533,13 @@ impl Panel {
                 let (tw, th) = (40.0, 20.0);
                 let (tx, ty) = (right - tw, y + rh / 2.0 - th / 2.0);
                 if ease < 0.5 {
-                    rr(pm, s, tx, ty, tw, th, th / 2.0, [200, 200, 200], 1.0 - ease * 2.0);
+                    rr(pm, s, tx, ty, tw, th, th / 2.0, TRACK, 1.0 - ease * 2.0);
                     rr(pm, s, tx + 1.2, ty + 1.2, tw - 2.4, th - 2.4, th / 2.0 - 1.2, mix(CARD, CARD_HOVER, 0.0), 1.0 - ease * 2.0);
                 }
                 rr(pm, s, tx, ty, tw, th, th / 2.0, ACCENT, ease);
                 let d = 12.0 + ease * 2.0;
                 let kx = tx + 4.0 + ease * (tw - 8.0 - 14.0) + (14.0 - d) / 2.0;
-                rr(pm, s, kx, ty + (th - d) / 2.0, d, d, d / 2.0, mix([210, 210, 210], [20, 20, 20], ease), 1.0);
+                rr(pm, s, kx, ty + (th - d) / 2.0, d, d, d / 2.0, mix(TRACK, ON_ACCENT, ease), 1.0);
                 let lab = if *on { "On" } else { "Off" };
                 let lw = self.fonts.measure(Weight::Regular, lab, 13.5 * s) / s;
                 self.text_mid(pm, Weight::Regular, lab, tx - 14.0 - lw, y + rh / 2.0, 13.5, TEXT);
@@ -358,18 +553,46 @@ impl Panel {
                 let sx = right - vw - 14.0 - sw;
                 let ty = y + rh / 2.0;
                 let frac = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
-                rr(pm, s, sx, ty - 2.0, sw, 4.0, 2.0, [150, 150, 150], 1.0);
+                rr(pm, s, sx, ty - 2.0, sw, 4.0, 2.0, TRACK, 1.0);
                 rr(pm, s, sx, ty - 2.0, sw * frac, 4.0, 2.0, ACCENT, 1.0);
                 let held = self.drag == Some(*id);
                 let hov = self.hover == Some(*id);
                 let kx = sx + sw * frac;
-                rr(pm, s, kx - 10.0, ty - 10.0, 20.0, 20.0, 10.0, [69, 69, 69], 1.0);
-                rr(pm, s, kx - 10.0, ty - 10.0, 20.0, 20.0, 10.0, [255, 255, 255], 0.08);
-                let d = if held { 8.0 } else if hov { 14.0 } else { 12.0 };
+                rr(pm, s, kx - 10.0, ty - 10.0, 20.0, 20.0, 10.0, mix(CARD, TEXT, 0.25), 1.0);
+                                let d = if held { 8.0 } else if hov { 14.0 } else { 12.0 };
                 rr(pm, s, kx - d / 2.0, ty - d / 2.0, d, d, d / 2.0, ACCENT, 1.0);
                 let tw = self.fonts.measure(Weight::Regular, text, 14.0 * s) / s;
                 self.text_mid(pm, Weight::Regular, text, right - tw, ty, 14.0, TEXT);
                 self.hot.push(Hot { id: *id, x: sx - 12.0, y, w: sw + 24.0, h: rh });
+            }
+            Row::Themes(chosen) => {
+                card(self, pm, None);
+                self.text_mid(pm, Weight::Regular, "Theme", cx + 18.0, y + 20.0, 14.5, TEXT);
+                self.fonts.draw(pm, Weight::Regular, "Colours of this window (the island itself stays black)", (cx + 18.0) * s, (y + 42.0) * s, 12.5 * s, DIM, 1.0);
+                let n = THEMES.len() as f32;
+                let gap = 10.0;
+                let bw = ((cw - 36.0 - gap * (n - 1.0)) / n).min(110.0);
+                for (i, t) in THEMES.iter().enumerate() {
+                    let id = Id::Theme(i as u8);
+                    let bx = cx + 18.0 + i as f32 * (bw + gap);
+                    let by = y + 56.0;
+                    let on = *chosen as usize == i;
+                    let hov = self.hover == Some(id);
+                    // a small sample of the theme: its window, a card and the accent
+                    if on {
+                        rr(pm, s, bx - 2.5, by - 2.5, bw + 5.0, 56.0 + 5.0, 9.5, ACCENT, 1.0);
+                    }
+                    rr(pm, s, bx, by, bw, 56.0, 7.0, if hov && !on { t.edge } else { t.page_bg }, 1.0);
+                    rr(pm, s, bx, by, bw, 56.0, 7.0, t.win_bg, 1.0);
+                    rr(pm, s, bx + 6.0, by + 7.0, bw - 12.0, 22.0, 4.0, t.card, 1.0);
+                    rr(pm, s, bx + 10.0, by + 14.0, bw * 0.38, 4.0, 2.0, t.text, 0.9);
+                    rr(pm, s, bx + 10.0, by + 21.0, bw * 0.24, 3.0, 1.5, t.dim, 0.9);
+                    rr(pm, s, bx + bw - 28.0, by + 14.0, 16.0, 8.0, 4.0, t.accent, 1.0);
+                    rr(pm, s, bx + 6.0, by + 36.0, bw - 12.0, 12.0, 4.0, t.accent, 1.0);
+                    let tw = self.fonts.measure(Weight::Semibold, t.name, 12.0 * s) / s;
+                    self.text_mid(pm, Weight::Semibold, t.name, bx + bw / 2.0 - tw / 2.0, by + 36.0 + 6.0, 11.0, t.on_accent);
+                    self.hot.push(Hot { id, x: bx, y: by, w: bw, h: 56.0 });
+                }
             }
             Row::Button(id, title, desc, label, style) => {
                 card(self, pm, None);
@@ -378,12 +601,12 @@ impl Panel {
                 let (bx, by) = (right - bw, y + rh / 2.0 - bh / 2.0);
                 let hov = self.hover == Some(*id);
                 let pressed = hov && self.down == Some(*id);
-                let base = if *style == 1 { ACCENT } else { [64, 64, 64] };
+                let base = if *style == 1 { ACCENT } else { BTN };
                 let col = if pressed { mix(base, [0, 0, 0], 0.22) } else if hov { mix(base, [255, 255, 255], 0.12) } else { base };
                 rr(pm, s, bx, by, bw, bh, 5.0, col, 1.0);
                 let tcol = match style {
-                    1 => [0, 0, 0],
-                    2 => [255, 138, 128],
+                    1 => ON_ACCENT,
+                    2 => if pal.light { [200, 40, 40] } else { [255, 138, 128] },
                     _ => TEXT,
                 };
                 let t = self.fonts.fit(Weight::Semibold, label, 13.5 * s, (bw - 14.0) * s);
@@ -405,9 +628,9 @@ impl Panel {
                     let (rx, ry) = (cx + 18.0, oy + 21.0);
                     if on {
                         rr(pm, s, rx, ry - 10.0, 20.0, 20.0, 10.0, ACCENT, 1.0);
-                        rr(pm, s, rx + 6.0, ry - 4.0, 8.0, 8.0, 4.0, [0, 0, 0], 1.0);
+                        rr(pm, s, rx + 6.0, ry - 4.0, 8.0, 8.0, 4.0, ON_ACCENT, 1.0);
                     } else {
-                        rr(pm, s, rx, ry - 10.0, 20.0, 20.0, 10.0, [200, 200, 200], 1.0);
+                        rr(pm, s, rx, ry - 10.0, 20.0, 20.0, 10.0, TRACK, 1.0);
                         rr(pm, s, rx + 1.4, ry - 8.6, 17.2, 17.2, 8.6, CARD, 1.0);
                     }
                     self.text_mid(pm, Weight::Regular, name, rx + 34.0, ry, 14.0, TEXT);
@@ -418,8 +641,10 @@ impl Panel {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(non_snake_case)]
     fn title_desc(&mut self, pm: &mut Pixmap, title: &str, desc: &str, x: f32, y: f32, rh: f32, max_w: f32) {
         let s = self.scale;
+        let (TEXT, DIM) = (self.pal().text, self.pal().dim);
         if desc.is_empty() {
             self.text_mid(pm, Weight::Regular, title, x, y + rh / 2.0, 14.5, TEXT);
         } else {
@@ -437,11 +662,24 @@ impl Panel {
     }
 
     pub fn hand(&self) -> bool {
-        self.hover.is_some()
+        self.hover.is_some() || self.preview_hand
     }
 
     pub fn leave(&mut self) {
         self.hover = None;
+        self.preview.set_cursor(None);
+        self.cursor_in = false;
+    }
+
+    /// Is the point over the live island's stage? Then the island's own coordinates.
+    fn in_stage(&self, x: f32, y: f32) -> Option<(f32, f32)> {
+        let (sx, sy, sw, sh) = self.stage;
+        let k = self.scale;
+        if x >= sx * k && x <= (sx + sw) * k && y >= sy * k && y <= (sy + sh) * k {
+            Some((x - self.canvas_at.0, y - self.canvas_at.1))
+        } else {
+            None
+        }
     }
 
     pub fn cancel(&mut self) {
@@ -451,6 +689,21 @@ impl Panel {
 
     pub fn mouse_move(&mut self, x: f32, y: f32) -> Option<Act> {
         self.hover = self.hit_at(x, y);
+        match self.in_stage(x, y) {
+            Some((px, py)) => {
+                self.preview.set_cursor(Some((px, py)));
+                self.preview.mouse_move(px);
+                self.preview_hand = self.preview.wants_hand(px, py);
+                self.cursor_in = true;
+            }
+            None => {
+                if self.cursor_in {
+                    self.preview.set_cursor(None);
+                    self.cursor_in = false;
+                    self.preview_hand = false;
+                }
+            }
+        }
         if let Some(id) = self.drag {
             return self.set_slider(id, x);
         }
@@ -461,6 +714,12 @@ impl Panel {
         let id = self.hit_at(x, y);
         self.hover = id;
         self.down = id;
+        if id.is_none() {
+            if let Some((px, py)) = self.in_stage(x, y) {
+                self.preview.mouse_down(px, py);
+                self.preview_down = true;
+            }
+        }
         match id {
             Some(Id::Nav(n)) => {
                 self.set_page(n);
@@ -476,6 +735,20 @@ impl Panel {
     }
 
     pub fn mouse_up(&mut self, x: f32, y: f32) -> Option<Act> {
+        if self.preview_down {
+            self.preview_down = false;
+            let (px, py) = (x - self.canvas_at.0, y - self.canvas_at.1);
+            match self.preview.mouse_up(px, py) {
+                Hit::PlayPause => self.preview.toggle_playing_locally(),
+                Hit::Card(_) => self.preview.dismiss_card(),
+                Hit::Bubble => self.preview.dismiss_bubble(),
+                Hit::LyricsToggle => {
+                    self.preview.toggle_lyrics();
+                    self.feed_lyrics();
+                }
+                _ => {}
+            }
+        }
         let released = self.hit_at(x, y);
         let pressed = self.down.take();
         self.drag = None;
@@ -496,11 +769,31 @@ impl Panel {
             Id::Bubble => s.use_bubble = !s.use_bubble,
             Id::FsHide => s.fullscreen_hide = !s.fullscreen_hide,
             Id::CheckUpd => s.check_updates = !s.check_updates,
+            Id::Theme(n) => {
+                if s.theme == n {
+                    return None;
+                }
+                s.theme = n.min(5);
+            }
             Id::MaxOpt(n) => {
                 s.maximized = [MaxMode::Notch, MaxMode::Hide, MaxMode::Normal][n as usize % 3];
                 if s.maximized == self.s.maximized {
                     return None;
                 }
+            }
+            Id::DemoNotif => {
+                self.demo_notification();
+                return None;
+            }
+            Id::DemoMax => {
+                self.demo_max = !self.demo_max;
+                self.sync_preview();
+                return None;
+            }
+            Id::DemoFs => {
+                self.demo_fs = !self.demo_fs;
+                self.sync_preview();
+                return None;
             }
             Id::Test => return Some(Act::Test),
             Id::CheckNow => return Some(if self.ready { Act::Install } else { Act::CheckNow }),
@@ -509,6 +802,7 @@ impl Panel {
             _ => return None,
         }
         self.s = s.clone();
+        self.sync_preview();
         Some(Act::Changed(s))
     }
 
@@ -531,10 +825,26 @@ impl Panel {
             return None;
         }
         *slot = v;
+        self.sync_preview();
         Some(Act::Changed(self.s.clone()))
     }
 
+    /// Press the control `id` as if it was clicked (used by the preview tool and tests).
+    pub fn press(&mut self, id: Id) -> Option<Act> {
+        self.render();
+        let r = self.hot.iter().find(|r| r.id == id)?;
+        let (x, y) = ((r.x + r.w / 2.0) * self.scale, (r.y + r.h / 2.0) * self.scale);
+        let _ = self.mouse_move(x, y);
+        let down = self.mouse_down(x, y);
+        let up = self.mouse_up(x, y);
+        up.or(down)
+    }
+
     pub fn wheel(&mut self, notches: f32) {
+        if self.cursor_in {
+            self.preview.wheel(notches);
+            return;
+        }
         self.scroll = (self.scroll - notches * 56.0).clamp(0.0, self.max_scroll);
     }
 }

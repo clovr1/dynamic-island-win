@@ -582,6 +582,15 @@ fn set_autostart(on: bool) {
 }
 
 /// The tray icon: a small island (black pill, white outline, cover dot and equalizer bars), drawn here at the size the tray wants.
+/// The app's own icon (embedded in the exe), at the size asked for.
+pub fn app_icon(size: i32) -> Option<HICON> {
+    unsafe {
+        let inst = GetModuleHandleW(None).ok()?;
+        let h = LoadImageW(inst, PCWSTR(1usize as *const u16), IMAGE_ICON, size, size, LR_DEFAULTCOLOR).ok()?;
+        Some(HICON(h.0))
+    }
+}
+
 pub fn make_tray_icon() -> Option<HICON> {
     use tiny_skia::Pixmap;
     unsafe {
@@ -637,7 +646,8 @@ fn tray_data(hwnd: HWND) -> NOTIFYICONDATAW {
 fn add_tray_icon(hwnd: HWND) {
     unsafe {
         let mut nid = tray_data(hwnd);
-        if let Some(icon) = make_tray_icon() {
+        let sz = unsafe { GetSystemMetrics(SM_CXSMICON).max(16) };
+        if let Some(icon) = app_icon(sz).or_else(make_tray_icon) {
             nid.hIcon = icon;
         }
         let _ = Shell_NotifyIconW(NIM_ADD, &nid);
@@ -656,7 +666,7 @@ fn remove_tray_icon(hwnd: HWND) {
 
 fn open_settings() {
     if let Some(s) = with_app(|a| a.settings.clone()) {
-        let icon = make_tray_icon();
+        let icon = app_icon(32).or_else(make_tray_icon);
         settings_win::open(&s, autostart_enabled(), icon);
     }
 }

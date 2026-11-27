@@ -1,8 +1,11 @@
 [package]
 name = "island"
-version = "0.9.5"
+version = "0.10.0"
 edition = "2021"
 description = "Dynamic Island for Windows: a small native notch (no web engine)"
+
+[build-dependencies]
+embed-resource = "2"
 
 [dependencies]
 tiny-skia = "0.11"
