@@ -168,12 +168,28 @@ fn tap(freq: f32, len: f32, amp: f32) -> Vec<f32> {
         .collect()
 }
 
+/// A water droplet ("plip"): a sine whose pitch shoots up and then settles, with a quick round decay.
+fn droplet(f0: f32, f1: f32, tg: f32, len: f32, tau: f32, amp: f32) -> Vec<f32> {
+    let n = (len * SR as f32) as usize;
+    let mut phase = 0.0f32;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / SR as f32;
+            let f = f0 + (f1 - f0) * (1.0 - (-t / tg).exp());
+            phase += TAU * f / SR as f32;
+            let env = (1.0 - (-t / 0.002).exp()) * (-t / tau).exp();
+            (phase.sin() * 0.9 + (2.0 * phase).sin() * 0.07) * env * amp
+        })
+        .collect()
+}
+
 /// The island's sounds, in the spirit of the iPhone's system sounds (original recordings-free synthesis, not copies):
-///  notification = two soft marimba notes ("Note" / "Bamboo"), status = "bloop - ding" like the charging sound,
-///  pause = a low "tok" like the lock sound, play = a light keyboard-click tick, skip = a soft swoosh like "mail sent".
+///  notification = a water droplet, status = "bloop - ding" like the charging sound,
+///  pause = a low "tok" like the lock sound, play = a light keyboard-click tick, skip = two light ticks.
 fn pack_ios(dir: &str) {
-    let mut n = pluck(783.99, 0.45, 1.0);
-    mix_at(&mut n, &pluck(1174.66, 0.5, 0.8), 0.12);
+    // notification: a water droplet, and a smaller one after it
+    let mut n = droplet(650.0, 1600.0, 0.018, 0.28, 0.055, 1.0);
+    mix_at(&mut n, &droplet(560.0, 1250.0, 0.02, 0.24, 0.045, 0.45), 0.15);
     write_wav(&format!("{dir}/notify.wav"), &finish(n, 0.2));
     let mut s = bloop(260.0, 430.0, 0.07, 0.14, 0.04, 0.9);
     mix_at(&mut s, &bell(880.0, 0.45, 0.9), 0.1);
@@ -182,7 +198,10 @@ fn pack_ios(dir: &str) {
     let mut p = tap(310.0, 0.05, 1.0);
     mix_at(&mut p, &tap(900.0, 0.025, 0.3), 0.0);
     write_wav(&format!("{dir}/play.wav"), &finish(p, 0.18));
-    write_wav(&format!("{dir}/skip.wav"), &finish(air(700.0, 3200.0, 0.22, 0.55, 1.0), 0.11));
+    // skip: two light, quick ticks (a bit higher than pause / play)
+    let mut k = tap(430.0, 0.035, 1.0);
+    mix_at(&mut k, &tap(540.0, 0.035, 0.8), 0.055);
+    write_wav(&format!("{dir}/skip.wav"), &finish(k, 0.17));
 }
 
 fn main() {
