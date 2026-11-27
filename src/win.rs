@@ -146,7 +146,7 @@ impl App {
         let snd = self.ui.take_sounds();
         if self.settings.sounds {
             for s in snd {
-                crate::sound::play(s, self.settings.volume, self.settings.sound_pack);
+                crate::sound::play(s, self.settings.volume);
             }
         }
         let pm = self.ui.render();

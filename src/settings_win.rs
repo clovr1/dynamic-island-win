@@ -104,7 +104,7 @@ impl Win {
         let snd = self.panel.take_sounds();
         if self.panel.s.sounds {
             for s in snd {
-                crate::sound::play(s, self.panel.s.volume, self.panel.s.sound_pack);
+                crate::sound::play(s, self.panel.s.volume);
             }
         }
         let (pm, (rx, ry, rw, rh)) = self.panel.frame();
