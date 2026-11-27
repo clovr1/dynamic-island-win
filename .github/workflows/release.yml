@@ -1,0 +1,27 @@
+# Publishes a new version: push a tag like v0.9.1 and this builds the program on Windows and attaches it to a GitHub release.
+# The island (Settings -> Updates) then finds it, downloads it and offers "Restart now".
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Put the tag's version into Cargo.toml
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart("v")
+          (Get-Content Cargo.toml) -replace '^version = ".*"', "version = `"$v`"" | Set-Content Cargo.toml
+      - run: cargo build --release --bin island
+      - name: Name the file
+        shell: pwsh
+        run: Copy-Item target/release/island.exe Dynamic-Island.exe
+      - name: Publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" Dynamic-Island.exe --title "${{ github.ref_name }}" --generate-notes

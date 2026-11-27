@@ -1,0 +1,903 @@
+//! The Windows shell around the island: one transparent window at the top edge of the screen, drawn with per-pixel alpha.
+//! Pixels that are fully transparent let the mouse through, so only the island itself ever catches the mouse.
+
+use crate::media::{self, Cmd, Shared, WM_MEDIA};
+use crate::net::{self, WM_LYRICS};
+use crate::notify::{self, WM_NOTIF};
+use crate::settings::Settings;
+use crate::settings_win::{self, Action};
+use crate::update::{self, Outcome, WM_UPDATE};
+use crate::ui::{Hit, Need, Ui};
+use std::cell::RefCell;
+use std::ffi::c_void;
+use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+use windows::core::{w, PCWSTR};
+use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::Graphics::Dwm::DwmFlush;
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Registry::*;
+use windows::Win32::System::Threading::{CreateMutexW, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
+use windows::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
+use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_SINGLETHREADED};
+use windows::Win32::UI::HiDpi::*;
+use windows::Win32::UI::Input::KeyboardAndMouse::{keybd_event, ReleaseCapture, SetCapture, TrackMouseEvent, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, TME_LEAVE, TRACKMOUSEEVENT, VK_MENU};
+use windows::Win32::UI::Shell::{SHQueryUserNotificationState, ShellExecuteW, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN, QUNS_APP};
+use windows::Win32::UI::WindowsAndMessaging::*;
+
+/// "the window in front changed" / "the playing app changed" (WM_APP + 3)
+pub const WM_ENV: u32 = 0x8003;
+const EVENT_SYSTEM_FOREGROUND: u32 = 0x0003;
+const WINEVENT_OUTOFCONTEXT: u32 = 0;
+static MAIN_HWND: AtomicIsize = AtomicIsize::new(0);
+
+/// Dedicated music apps. A browser is not one: you are always "in" it, so its pill stays.
+const PLAYERS: [&str; 11] = ["spotify", "applemusic", "itunes", "tidal", "deezer", "amazonmusic", "musicbee", "foobar2000", "aimp", "winamp", "vlc"];
+
+/// Windows tells us the instant another window comes to the front.
+unsafe extern "system" fn on_foreground(_h: HWINEVENTHOOK, _event: u32, _hwnd: HWND, _o: i32, _c: i32, _t: u32, _ms: u32) {
+    let h = MAIN_HWND.load(Ordering::Relaxed);
+    if h != 0 {
+        let _ = PostMessageW(HWND(h as *mut _), WM_ENV, WPARAM(0), LPARAM(0));
+    }
+}
+
+/// File name (without .exe, lowercase) of the program that owns the window in front.
+fn foreground_program() -> String {
+    unsafe {
+        let fg = GetForegroundWindow();
+        if fg.0.is_null() {
+            return String::new();
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(fg, Some(&mut pid));
+        let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return String::new() };
+        let mut buf = [0u16; 520];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut len).is_ok();
+        let _ = CloseHandle(h);
+        if !ok {
+            return String::new();
+        }
+        let path = String::from_utf16_lossy(&buf[..len as usize]);
+        std::path::Path::new(&path).file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default()
+    }
+}
+
+const TIMER_ID: usize = 1;
+/// what the rest of the screen is doing (full screen / maximized window): checked about once a second
+const TIMER_ENV: usize = 2;
+/// while the island is tucked away: is the cursor at the top edge?
+const TIMER_PEEK: usize = 3;
+/// the next look for a new version
+const TIMER_UPD: usize = 4;
+const WM_MOUSELEAVE: u32 = 0x02A3;
+const RUN_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+/// the "app" of the update card: a click on it installs instead of opening an app
+const UPDATE_AUMID: &str = "island:update";
+const RUN_NAME: PCWSTR = w!("DynamicIsland");
+
+pub fn log(msg: &str) {
+    use std::io::Write;
+    let path = std::env::temp_dir().join("dynamic-island-native.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{msg}");
+    }
+}
+
+struct App {
+    hwnd: HWND,
+    ui: Ui,
+    mem_dc: HDC,
+    bits: *mut u8,
+    pw: i32,
+    ph: i32,
+    shared: Arc<Shared>,
+    tracking: bool,
+    timer: Need,
+    last: Instant,
+    bmp: HBITMAP,
+    /// the screen's own scale (DPI); the user's size setting multiplies it
+    dpi_scale: f32,
+    settings: Settings,
+    /// a downloaded, checked update waits to be swapped in (its version)
+    update_ready: Option<String>,
+}
+
+/// `%APPDATA%\DynamicIsland\settings.ini`
+fn settings_path() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("APPDATA")?;
+    Some(std::path::PathBuf::from(base).join("DynamicIsland").join("settings.ini"))
+}
+
+fn load_settings() -> Settings {
+    settings_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| Settings::parse(&t)).unwrap_or_default()
+}
+
+fn save_settings(s: &Settings) {
+    if let Some(p) = settings_path() {
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(p, s.to_text());
+    }
+}
+
+thread_local! {
+    static APP: RefCell<Option<App>> = const { RefCell::new(None) };
+}
+
+fn with_app<R>(f: impl FnOnce(&mut App) -> R) -> Option<R> {
+    APP.with(|a| a.try_borrow_mut().ok().and_then(|mut g| g.as_mut().map(f)))
+}
+
+impl App {
+    fn present(&mut self) {
+        let pm = self.ui.render();
+        unsafe {
+            let dst = std::slice::from_raw_parts_mut(self.bits, (self.pw * self.ph * 4) as usize);
+            for (d, s) in dst.chunks_exact_mut(4).zip(pm.data().chunks_exact(4)) {
+                d[0] = s[2];
+                d[1] = s[1];
+                d[2] = s[0];
+                d[3] = s[3];
+            }
+            let size = SIZE { cx: self.pw, cy: self.ph };
+            let src = POINT { x: 0, y: 0 };
+            let blend = BLENDFUNCTION { BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: AC_SRC_ALPHA as u8 };
+            let _ = UpdateLayeredWindow(self.hwnd, None, None, Some(&size), self.mem_dc, Some(&src), COLORREF(0), Some(&blend), ULW_ALPHA);
+        }
+    }
+
+    /// Fast = the message loop draws one frame per screen refresh (see `run`), Slow = a 30 fps timer, Rest = nothing runs at all.
+    fn set_timer(&mut self, need: Need) {
+        if need == self.timer {
+            return;
+        }
+        unsafe {
+            match need {
+                Need::Slow => {
+                    SetTimer(self.hwnd, TIMER_ID, 33, None);
+                }
+                Need::Rest | Need::Fast => {
+                    let _ = KillTimer(self.hwnd, TIMER_ID);
+                }
+            }
+        }
+        if self.timer == Need::Rest {
+            self.last = Instant::now();
+        }
+        self.timer = need;
+    }
+
+    fn is_animating(&self) -> bool {
+        self.timer == Need::Fast
+    }
+
+    fn kick(&mut self) {
+        let need = self.ui.need();
+        self.set_timer(need);
+    }
+
+    /// One animation step (called by the 30 fps timer, and once per screen refresh while something is moving).
+    fn on_timer(&mut self) {
+        let now = Instant::now();
+        let dt = now.duration_since(self.last).as_secs_f32().min(0.1);
+        self.last = now;
+        // safety net: if Windows never told us the mouse left, look where the cursor really is
+        if self.ui.is_open() || self.tracking {
+            let mut pt = POINT::default();
+            unsafe {
+                if GetCursorPos(&mut pt).is_ok() {
+                    let mut r = RECT::default();
+                    let _ = GetWindowRect(self.hwnd, &mut r);
+                    let (ix, iy, iw, ih) = self.ui.rect_px();
+                    let m = 6.0 * self.ui.scale();
+                    let (cx, cy) = ((pt.x - r.left) as f32, (pt.y - r.top) as f32);
+                    if cx < ix - m || cx > ix + iw + m || cy < iy - m || cy > iy + ih + m {
+                        self.ui.set_cursor(None);
+                        self.tracking = false;
+                    }
+                }
+            }
+        }
+        let need = self.ui.tick(dt);
+        self.present();
+        self.set_timer(need);
+    }
+
+    /// Start the lyrics lookup the UI asked for (only when lyrics are switched on, once per song).
+    fn start_lyrics_lookup(&mut self) {
+        if let Some(r) = self.ui.take_lyrics_request() {
+            net::fetch_lyrics(self.hwnd.0 as isize, self.shared.clone(), r.key, r.title, r.artist, r.dur);
+        }
+    }
+
+    fn on_lyrics(&mut self) {
+        let list: Vec<_> = self.shared.lyrics.lock().map(|mut g| std::mem::take(&mut *g)).unwrap_or_default();
+        for m in list {
+            self.ui.set_lyrics(&m.key, m.found);
+        }
+        self.present();
+        self.kick();
+    }
+
+    fn on_media(&mut self) {
+        let info = self.shared.info.lock().ok().and_then(|mut g| g.take());
+        let art = self.shared.art.lock().ok().and_then(|mut g| g.take());
+        if let Some(a) = art {
+            self.ui.set_art(a);
+        }
+        if let Some(i) = info {
+            self.ui.set_media(i);
+            self.start_lyrics_lookup();
+        }
+        self.present();
+        self.kick();
+    }
+
+    /// Full screen / maximized window: asked about once a second (Windows has no cheaper way to tell us).
+    fn check_env(&mut self) {
+        let mut env = self.ui.env();
+        unsafe {
+            let mut fs = false;
+            if let Ok(st) = SHQueryUserNotificationState() {
+                fs = st == QUNS_BUSY || st == QUNS_RUNNING_D3D_FULL_SCREEN || st == QUNS_PRESENTATION_MODE || st == QUNS_APP;
+            }
+            let mut mx = false;
+            let fg = GetForegroundWindow();
+            if !fg.0.is_null() && fg != self.hwnd && IsWindowVisible(fg).as_bool() && !IsIconic(fg).as_bool() && IsZoomed(fg).as_bool() {
+                let mut buf = [0u16; 64];
+                let n = GetClassNameW(fg, &mut buf) as usize;
+                let class = String::from_utf16_lossy(&buf[..n]);
+                mx = !matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd");
+            }
+            env.fullscreen = fs;
+            env.maximized = mx;
+        }
+        // is the window in front the music app that is playing? (then its own window shows the song: the island stays empty)
+        let app = self.shared.app.lock().map(|g| g.clone()).unwrap_or_default();
+        let prog = foreground_program();
+        env.player_front = !prog.is_empty() && PLAYERS.iter().any(|p| app.contains(p) && prog.contains(p));
+        let concealed = env.fullscreen || env.maximized;
+        if !concealed {
+            env.peek = false;
+        }
+        if env != self.ui.env() {
+            self.ui.set_env(env);
+            unsafe {
+                if concealed {
+                    SetTimer(self.hwnd, TIMER_PEEK, 100, None);
+                } else {
+                    let _ = KillTimer(self.hwnd, TIMER_PEEK);
+                }
+            }
+            self.present();
+            self.kick();
+        }
+    }
+
+    /// Cursor at the very top edge (middle of the screen) shows the island again for a moment, like a hidden menu bar.
+    fn check_peek(&mut self) {
+        let mut pt = POINT::default();
+        unsafe {
+            if GetCursorPos(&mut pt).is_err() {
+                return;
+            }
+            let mut r = RECT::default();
+            let _ = GetWindowRect(self.hwnd, &mut r);
+            let s = self.ui.scale();
+            let cx = r.left as f32 + self.pw as f32 / 2.0;
+            let (dx, y) = ((pt.x as f32 - cx).abs(), (pt.y - r.top) as f32);
+            let mut env = self.ui.env();
+            // a visible notch is hovered directly; the top-edge peek is only for an island that is hidden
+            let want = if !self.ui.needs_peek() { false } else if env.peek { y <= 140.0 * s && dx < 280.0 * s } else { y <= 1.0 && dx < 140.0 * s };
+            if want != env.peek {
+                env.peek = want;
+                self.ui.set_env(env);
+                self.present();
+                self.kick();
+            }
+        }
+    }
+
+    fn test_notification(&mut self) {
+        self.ui.push_notification(crate::ui::NotifData {
+            app: "Dynamic Island".into(),
+            aumid: String::new(),
+            title: "Test notification".into(),
+            body: "If you can see this, cards work".into(),
+            icon: None,
+        });
+        self.present();
+        self.kick();
+    }
+
+    fn on_notifs(&mut self) {
+        let list: Vec<_> = self.shared.notifs.lock().map(|mut g| std::mem::take(&mut *g)).unwrap_or_default();
+        if !list.is_empty() {
+            log(&format!("notifications: showing {}", list.len()));
+        }
+        for n in list {
+            self.ui.push_notification(n);
+        }
+        self.present();
+        self.kick();
+    }
+
+    /// The mouse went down. Buttons press in; a drag on the progress bar starts here.
+    fn on_down(&mut self, x: f32, y: f32) {
+        unsafe {
+            SetCapture(self.hwnd);
+        }
+        self.ui.mouse_down(x, y);
+        self.present();
+        self.kick();
+    }
+
+    /// The mouse went up: the click happens now (if it is still on what it went down on).
+    fn on_up(&mut self, x: f32, y: f32) {
+        unsafe {
+            let _ = ReleaseCapture();
+        }
+        match self.ui.mouse_up(x, y) {
+            Hit::Card(aumid) => {
+                self.ui.dismiss_card();
+                if aumid == UPDATE_AUMID {
+                    install_update();
+                } else {
+                    open_app(&aumid);
+                }
+            }
+            Hit::Bubble => {
+                let aumid = self.ui.bubble_aumid();
+                self.ui.dismiss_bubble();
+                open_app(&aumid);
+            }
+            Hit::LyricsToggle => {
+                self.ui.toggle_lyrics();
+                self.start_lyrics_lookup();
+            }
+            Hit::LyricLine(t) => media::command(&self.shared, Cmd::Seek(t as f64)),
+            Hit::PlayPause => {
+                media::command(&self.shared, Cmd::Toggle);
+                self.ui.toggle_playing_locally();
+            }
+            Hit::Prev => media::command(&self.shared, Cmd::Prev),
+            Hit::Next => media::command(&self.shared, Cmd::Next),
+            Hit::Seek(f) => media::command(&self.shared, Cmd::Seek(f as f64 * self.ui.duration())),
+            Hit::OpenSource => {
+                let app = self.shared.app_raw.lock().map(|g| g.clone()).unwrap_or_default();
+                open_music_app(&app);
+            }
+            _ => {}
+        }
+        self.present();
+        self.kick();
+    }
+
+    /// New settings: apply them at once, save them.
+    fn apply_settings(&mut self, mut s: Settings) {
+        s.clamp();
+        if s == self.settings {
+            return;
+        }
+        let size_changed = s.scale_pct != self.settings.scale_pct;
+        self.settings = s.clone();
+        save_settings(&s);
+        self.ui.set_settings(&s);
+        if size_changed {
+            self.resize();
+        }
+        self.check_env();
+        self.present();
+        self.kick();
+    }
+
+    /// The island's size changed (the size setting): a new bitmap, the window resized and centred again.
+    fn resize(&mut self) {
+        let scale = self.dpi_scale * self.settings.scale_pct as f32 / 100.0;
+        let (pw, ph) = self.ui.set_scale(scale);
+        let (pw, ph) = (pw as i32, ph as i32);
+        unsafe {
+            let bmi = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: pw,
+                    biHeight: -ph,
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut bits: *mut c_void = std::ptr::null_mut();
+            if let Ok(bmp) = CreateDIBSection(self.mem_dc, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) {
+                SelectObject(self.mem_dc, bmp);
+                let _ = DeleteObject(self.bmp);
+                self.bmp = bmp;
+                self.bits = bits as *mut u8;
+                self.pw = pw;
+                self.ph = ph;
+                self.center();
+            }
+        }
+    }
+
+    /// A background update check finished.
+    fn on_update(&mut self) {
+        let Some((manual, out)) = update::take_result() else { return };
+        match out {
+            Outcome::UpToDate => {
+                log("update: up to date");
+                if manual {
+                    settings_win::set_update_status(&format!("You have the newest version ({}).", crate::version::VERSION), self.update_ready.is_some());
+                }
+            }
+            Outcome::Failed(msg) => {
+                log(&format!("update: {msg}"));
+                if manual {
+                    settings_win::set_update_status(&msg, self.update_ready.is_some());
+                }
+            }
+            Outcome::Ready(ver) => {
+                log(&format!("update: {ver} downloaded"));
+                let first = self.update_ready.as_deref() != Some(ver.as_str());
+                self.update_ready = Some(ver.clone());
+                settings_win::set_update_status(&format!("Version {ver} is downloaded and ready."), true);
+                if first {
+                    self.ui.push_notification(crate::ui::NotifData {
+                        app: "Dynamic Island".into(),
+                        aumid: UPDATE_AUMID.into(),
+                        title: "Update ready".into(),
+                        body: format!("Version {ver} - click here to restart and install"),
+                        icon: None,
+                    });
+                    self.present();
+                    self.kick();
+                }
+            }
+        }
+    }
+
+    /// Time to look for a new version (every few hours, if the user allows it).
+    fn on_update_timer(&mut self) {
+        unsafe {
+            SetTimer(self.hwnd, TIMER_UPD, 6 * 60 * 60 * 1000, None);
+        }
+        if self.settings.check_updates && self.update_ready.is_none() {
+            update::spawn_check(self.hwnd.0 as isize, self.settings.update_repo.clone(), false);
+        }
+    }
+
+    fn center(&self) {
+        unsafe {
+            let sw = GetSystemMetrics(SM_CXSCREEN);
+            let _ = SetWindowPos(self.hwnd, HWND_TOPMOST, (sw - self.pw) / 2, 0, self.pw, self.ph, SWP_NOACTIVATE);
+        }
+    }
+}
+
+/// Bring the music app forward: its window if it is open, otherwise start it.
+fn open_music_app(aumid: &str) {
+    if aumid.is_empty() {
+        return;
+    }
+    // "Spotify.exe" -> "spotify", "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify" -> "spotify"
+    let tail = aumid.rsplit('!').next().unwrap_or(aumid);
+    let stem = tail.trim_end_matches(".exe").trim_end_matches(".EXE").to_lowercase();
+    struct Find {
+        stem: String,
+        found: HWND,
+    }
+    unsafe extern "system" fn each(h: HWND, lp: LPARAM) -> BOOL {
+        let f = &mut *(lp.0 as *mut Find);
+        if !IsWindowVisible(h).as_bool() || GetWindow(h, GW_OWNER).map(|o| !o.0.is_null()).unwrap_or(false) {
+            return BOOL(1);
+        }
+        let len = GetWindowTextLengthW(h);
+        if len == 0 {
+            return BOOL(1);
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(h, Some(&mut pid));
+        let Ok(p) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return BOOL(1) };
+        let mut buf = [0u16; 520];
+        let mut n = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(p, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut n).is_ok();
+        let _ = CloseHandle(p);
+        if ok {
+            let path = String::from_utf16_lossy(&buf[..n as usize]).to_lowercase();
+            let name = std::path::Path::new(&path).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            if !f.stem.is_empty() && name.contains(&f.stem) {
+                f.found = h;
+                return BOOL(0);
+            }
+        }
+        BOOL(1)
+    }
+    let mut f = Find { stem, found: HWND::default() };
+    unsafe {
+        let _ = EnumWindows(Some(each), LPARAM(&mut f as *mut Find as isize));
+        if !f.found.0.is_null() {
+            if IsIconic(f.found).as_bool() {
+                let _ = ShowWindow(f.found, SW_RESTORE);
+            }
+            // Windows only lets the program in front switch windows: a tap on Alt makes it allow it
+            keybd_event(VK_MENU.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
+            keybd_event(VK_MENU.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+            let _ = SetForegroundWindow(f.found);
+        } else {
+            open_app(aumid);
+        }
+    }
+}
+
+/// Opens (or brings forward) the app a notification came from, by its Windows app id.
+fn open_app(aumid: &str) {
+    if aumid.is_empty() || aumid.contains('"') {
+        return;
+    }
+    let target: Vec<u16> = format!("shell:AppsFolder\\{aumid}").encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        ShellExecuteW(None, w!("open"), PCWSTR(target.as_ptr()), None, None, SW_SHOWNORMAL);
+    }
+}
+
+fn autostart_enabled() -> bool {
+    unsafe { RegGetValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_NAME, RRF_RT_REG_SZ, None, None, None) == ERROR_SUCCESS }
+}
+
+fn set_autostart(on: bool) {
+    unsafe {
+        if on {
+            if let Ok(exe) = std::env::current_exe() {
+                let v: Vec<u16> = format!("\"{}\"", exe.display()).encode_utf16().chain(std::iter::once(0)).collect();
+                let _ = RegSetKeyValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_NAME, REG_SZ.0, Some(v.as_ptr() as *const c_void), (v.len() * 2) as u32);
+            }
+        } else {
+            let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_NAME);
+        }
+    }
+}
+
+fn open_settings() {
+    if let Some(s) = with_app(|a| a.settings.clone()) {
+        settings_win::set_base(&s);
+        settings_win::open(&s, autostart_enabled());
+    }
+}
+
+/// Swap the downloaded update in and restart (the new copy waits for this one to end).
+fn install_update() {
+    match update::apply() {
+        Ok(()) => unsafe {
+            let h = MAIN_HWND.load(Ordering::Relaxed);
+            let _ = DestroyWindow(HWND(h as *mut _));
+        },
+        Err(e) => {
+            log(&format!("update: install failed: {e}"));
+            settings_win::set_update_status(&format!("Could not install: {e}"), true);
+        }
+    }
+}
+
+/// What the settings window asks for.
+fn on_settings_action(a: Action) {
+    match a {
+        Action::Changed(s) => {
+            with_app(|app| app.apply_settings(s));
+        }
+        Action::Reset => {
+            let d = Settings { update_repo: with_app(|a| a.settings.update_repo.clone()).unwrap_or_default(), ..Settings::default() };
+            with_app(|app| app.apply_settings(d.clone()));
+            settings_win::refresh(&d, autostart_enabled());
+        }
+        Action::Autostart(on) => set_autostart(on),
+        Action::CheckNow(s) => {
+            let hwnd = with_app(|app| {
+                app.apply_settings(s.clone());
+                app.hwnd.0 as isize
+            });
+            if let Some(h) = hwnd {
+                if update::busy() {
+                    settings_win::set_update_status("Already checking...", false);
+                } else {
+                    settings_win::set_update_status("Checking (and downloading if there is a newer version)...", false);
+                    update::spawn_check(h, s.update_repo, true);
+                }
+            }
+        }
+        Action::Install => install_update(),
+    }
+}
+
+/// Right-click menu. Not called while the app state is borrowed (the menu runs its own message loop).
+fn show_menu(hwnd: HWND) {
+    unsafe {
+        let Ok(menu) = CreatePopupMenu() else { return };
+        let on = autostart_enabled();
+        let _ = AppendMenuW(menu, MF_STRING | if on { MF_CHECKED } else { MF_UNCHECKED }, 1, w!("Start with Windows"));
+        let _ = AppendMenuW(menu, MF_STRING, 4, w!("Settings..."));
+        let ready = with_app(|a| a.update_ready.clone()).flatten();
+        if let Some(v) = &ready {
+            let t: Vec<u16> = format!("Restart to update to {v}").encode_utf16().chain(std::iter::once(0)).collect();
+            let _ = AppendMenuW(menu, MF_STRING, 5, PCWSTR(t.as_ptr()));
+        }
+        let _ = AppendMenuW(menu, MF_STRING, 3, w!("Show a test notification"));
+        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
+        let _ = AppendMenuW(menu, MF_STRING, 2, w!("Exit"));
+        let mut pt = POINT::default();
+        let _ = GetCursorPos(&mut pt);
+        let _ = SetForegroundWindow(hwnd);
+        let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, None);
+        let _ = DestroyMenu(menu);
+        match cmd.0 {
+            1 => set_autostart(!on),
+            4 => open_settings(),
+            5 => install_update(),
+            3 => {
+                with_app(|a| a.test_notification());
+            }
+            2 => {
+                let _ = DestroyWindow(hwnd);
+            }
+            _ => {}
+        }
+    }
+}
+
+extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    let xy = |lp: LPARAM| ((lp.0 & 0xFFFF) as i16 as f32, ((lp.0 >> 16) & 0xFFFF) as i16 as f32);
+    unsafe {
+        match msg {
+            WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
+            WM_MOUSEMOVE => {
+                with_app(|a| {
+                    if !a.tracking {
+                        let mut t = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+                        let _ = TrackMouseEvent(&mut t);
+                        a.tracking = true;
+                    }
+                    let (x, y) = xy(lp);
+                    a.ui.set_cursor(Some((x, y)));
+                    a.ui.mouse_move(x);
+                    a.kick();
+                });
+                return LRESULT(0);
+            }
+            WM_MOUSELEAVE => {
+                with_app(|a| {
+                    a.tracking = false;
+                    a.ui.set_cursor(None);
+                    a.kick();
+                });
+                return LRESULT(0);
+            }
+            WM_LBUTTONDOWN => {
+                let (x, y) = xy(lp);
+                with_app(|a| a.on_down(x, y));
+                return LRESULT(0);
+            }
+            WM_LBUTTONUP => {
+                let (x, y) = xy(lp);
+                with_app(|a| a.on_up(x, y));
+                return LRESULT(0);
+            }
+            WM_MOUSEWHEEL => {
+                let notches = ((wp.0 >> 16) as i16) as f32 / 120.0;
+                with_app(|a| {
+                    a.ui.wheel(notches);
+                    a.present();
+                    a.kick();
+                });
+                return LRESULT(0);
+            }
+            WM_SETCURSOR => {
+                // a hand over the things that can be clicked
+                if (lp.0 & 0xFFFF) as u32 == HTCLIENT {
+                    let mut pt = POINT::default();
+                    let _ = GetCursorPos(&mut pt);
+                    let _ = ScreenToClient(hwnd, &mut pt);
+                    let hand = with_app(|a| a.ui.wants_hand(pt.x as f32, pt.y as f32)).unwrap_or(false);
+                    if let Ok(c) = LoadCursorW(None, if hand { IDC_HAND } else { IDC_ARROW }) {
+                        SetCursor(c);
+                        return LRESULT(1);
+                    }
+                }
+            }
+            WM_RBUTTONUP => {
+                show_menu(hwnd);
+                return LRESULT(0);
+            }
+            WM_TIMER if wp.0 == TIMER_ID => {
+                with_app(|a| a.on_timer());
+                return LRESULT(0);
+            }
+            WM_TIMER if wp.0 == TIMER_ENV => {
+                with_app(|a| a.check_env());
+                return LRESULT(0);
+            }
+            WM_TIMER if wp.0 == TIMER_UPD => {
+                with_app(|a| a.on_update_timer());
+                return LRESULT(0);
+            }
+            WM_UPDATE => {
+                with_app(|a| a.on_update());
+                return LRESULT(0);
+            }
+            WM_TIMER if wp.0 == TIMER_PEEK => {
+                with_app(|a| a.check_peek());
+                return LRESULT(0);
+            }
+            WM_NOTIF => {
+                with_app(|a| a.on_notifs());
+                return LRESULT(0);
+            }
+            WM_LYRICS => {
+                with_app(|a| a.on_lyrics());
+                return LRESULT(0);
+            }
+            WM_ENV => {
+                with_app(|a| a.check_env());
+                return LRESULT(0);
+            }
+            WM_MEDIA => {
+                with_app(|a| a.on_media());
+                return LRESULT(0);
+            }
+            WM_DISPLAYCHANGE => {
+                with_app(|a| a.center());
+                return LRESULT(0);
+            }
+            WM_DESTROY => {
+                PostQuitMessage(0);
+                return LRESULT(0);
+            }
+            _ => {}
+        }
+        DefWindowProcW(hwnd, msg, wp, lp)
+    }
+}
+
+pub fn run() {
+    unsafe {
+        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        // only one island at a time
+        // (right after an update the old copy may still be closing: wait for it a few seconds)
+        let after_update = std::env::args().any(|a| a == "--after-update");
+        let mut tries = if after_update { 60 } else { 1 };
+        let _mutex = loop {
+            let m = CreateMutexW(None, true, w!("Local\\DynamicIslandNative"));
+            if GetLastError() != ERROR_ALREADY_EXISTS {
+                break m;
+            }
+            if let Ok(h) = m {
+                let _ = CloseHandle(h);
+            }
+            tries -= 1;
+            if tries <= 0 {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        };
+        update::cleanup();
+        let _ = RoInitialize(RO_INIT_SINGLETHREADED);
+
+        let hinst = GetModuleHandleW(None).unwrap_or_default();
+        let class = w!("DynamicIslandNativeWindow");
+        let wc = WNDCLASSW {
+            lpfnWndProc: Some(wndproc),
+            hInstance: hinst.into(),
+            lpszClassName: class,
+            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+            ..Default::default()
+        };
+        RegisterClassW(&wc);
+
+        let dpi_scale = GetDpiForSystem() as f32 / 96.0;
+        let settings = load_settings();
+        let scale = dpi_scale * settings.scale_pct as f32 / 100.0;
+        let mut ui = Ui::new(scale);
+        ui.set_settings(&settings);
+        let (pw, ph) = ui.size_px();
+        let (pw, ph) = (pw as i32, ph as i32);
+        let sw = GetSystemMetrics(SM_CXSCREEN);
+        let hwnd = match CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            class,
+            w!("Dynamic Island"),
+            WS_POPUP,
+            (sw - pw) / 2,
+            0,
+            pw,
+            ph,
+            None,
+            None,
+            hinst,
+            None,
+        ) {
+            Ok(h) => h,
+            Err(e) => {
+                log(&format!("CreateWindowExW failed: {e}"));
+                return;
+            }
+        };
+
+        // the picture the window shows: a 32-bit bitmap we draw into
+        let screen = GetDC(None);
+        let mem_dc = CreateCompatibleDC(screen);
+        ReleaseDC(None, screen);
+        let bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: pw,
+                biHeight: -ph,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits: *mut c_void = std::ptr::null_mut();
+        let Ok(bmp) = CreateDIBSection(mem_dc, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) else {
+            log("CreateDIBSection failed");
+            return;
+        };
+        SelectObject(mem_dc, bmp);
+
+        let shared = Arc::new(Shared::default());
+        APP.with(|a| {
+            *a.borrow_mut() = Some(App { hwnd, ui, mem_dc, bits: bits as *mut u8, pw, ph, shared: shared.clone(), tracking: false, timer: Need::Rest, last: Instant::now(), bmp, dpi_scale, settings, update_ready: None });
+        });
+        with_app(|a| a.present());
+        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        media::start(hwnd.0 as isize, shared.clone());
+        notify::start(hwnd.0 as isize, shared);
+        SetTimer(hwnd, TIMER_ENV, 1000, None);
+        SetTimer(hwnd, TIMER_UPD, 25_000, None); // the first look for a new version, shortly after start
+        settings_win::set_sink(Box::new(on_settings_action));
+        MAIN_HWND.store(hwnd.0 as isize, Ordering::Relaxed);
+        let _ = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, None, Some(on_foreground), 0, 0, WINEVENT_OUTOFCONTEXT);
+
+        // While something moves, the loop draws exactly one frame per screen refresh (DwmFlush waits for the next one), which is what
+        // makes it smooth. When nothing moves it just sleeps in GetMessage and uses no CPU at all.
+        let mut msg = MSG::default();
+        'outer: loop {
+            if with_app(|a| a.is_animating()).unwrap_or(false) {
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    if msg.message == WM_QUIT {
+                        break 'outer;
+                    }
+                    if settings_win::handle().map(|d| IsDialogMessageW(d, &msg).as_bool()).unwrap_or(false) {
+                        continue;
+                    }
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+                if with_app(|a| a.is_animating()).unwrap_or(false) {
+                    with_app(|a| a.on_timer());
+                    if DwmFlush().is_err() {
+                        std::thread::sleep(std::time::Duration::from_millis(8)); // no desktop composition: plain 120 fps pacing
+                    }
+                }
+            } else {
+                if !GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                    break;
+                }
+                if settings_win::handle().map(|d| IsDialogMessageW(d, &msg).as_bool()).unwrap_or(false) {
+                    continue;
+                }
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        if autostart_enabled() {
+            // (nothing to clean up: the entry stays until you switch it off in the menu)
+        }
+    }
+}
