@@ -192,7 +192,7 @@ impl App {
         let dt = now.duration_since(self.last).as_secs_f32().min(0.1);
         self.last = now;
         // safety net: if Windows never told us the mouse left, look where the cursor really is
-        if self.ui.is_open() || self.tracking {
+        if self.ui.has_cursor() || self.ui.is_open() || self.tracking {
             let mut pt = POINT::default();
             unsafe {
                 if GetCursorPos(&mut pt).is_ok() {
@@ -582,7 +582,7 @@ fn set_autostart(on: bool) {
 }
 
 /// The tray icon: a small island (black pill, white outline, cover dot and equalizer bars), drawn here at the size the tray wants.
-fn make_tray_icon() -> Option<HICON> {
+pub fn make_tray_icon() -> Option<HICON> {
     use tiny_skia::Pixmap;
     unsafe {
         let n = (GetSystemMetrics(SM_CXSMICON).max(16)) as u32;
@@ -656,7 +656,8 @@ fn remove_tray_icon(hwnd: HWND) {
 
 fn open_settings() {
     if let Some(s) = with_app(|a| a.settings.clone()) {
-        settings_win::open(&s, autostart_enabled());
+        let icon = make_tray_icon();
+        settings_win::open(&s, autostart_enabled(), icon);
     }
 }
 

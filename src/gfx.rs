@@ -30,6 +30,23 @@ impl Fonts {
         }
     }
 
+    /// Like `new`, but with Windows' own interface font (Segoe UI) where it is installed, so the settings look like any Windows app.
+    pub fn new_ui() -> Fonts {
+        let mut f = Fonts::new();
+        let dir = std::env::var_os("WINDIR").map(std::path::PathBuf::from).unwrap_or_else(|| "C:\\Windows".into()).join("Fonts");
+        let load = |name: &str| std::fs::read(dir.join(name)).ok().and_then(|b| fontdue::Font::from_bytes(b, fontdue::FontSettings::default()).ok());
+        if let Some(x) = load("segoeui.ttf") {
+            f.regular = x;
+        }
+        if let Some(x) = load("seguisb.ttf") {
+            f.semibold = x;
+        }
+        if let Some(x) = load("segoeuib.ttf") {
+            f.bold = x;
+        }
+        f
+    }
+
     fn glyph(&mut self, w: Weight, px: f32, c: char) -> usize {
         let wk = match w {
             Weight::Regular => 0u8,

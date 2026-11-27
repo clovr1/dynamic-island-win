@@ -14,46 +14,61 @@ fn click(p: &mut Panel, x: f32, y: f32) -> Option<Settings> {
     None
 }
 
+fn panel() -> Panel {
+    Panel::new(1.0, Settings::default(), false, (900, 600))
+}
+
+// layout: the list of pages is 224 wide, its items are at y = 84 + 42 * i (38 tall); the rows start at y = 86 and are 68 tall + 6 gap
+
 #[test]
-fn toggle_slider_segment() {
-    let mut p = Panel::new(1.0, Settings::default(), false, 1400.0);
-    // the music pill row
-    let s = click(&mut p, 200.0, 231.0).expect("toggle changes the settings");
+fn pages_and_toggle() {
+    let mut p = panel();
+    p.render();
+    // Music page, the first row (the small pill)
+    let _ = click(&mut p, 100.0, 84.0 + 42.0 + 19.0);
+    let s = click(&mut p, 500.0, 120.0).expect("toggle changes the settings");
     assert!(!s.show_music_pill);
-    let s = click(&mut p, 200.0, 231.0).expect("and back");
+    let s = click(&mut p, 500.0, 120.0).expect("and back");
     assert!(s.show_music_pill);
-    // the card-time slider: the middle of the track
+}
+
+#[test]
+fn slider_and_radio() {
+    let mut p = panel();
     p.render();
-    let _ = p.mouse_down(220.0, 576.0).map(|a| matches!(a, Act::Changed(_)));
-    let a = p.mouse_move(220.0, 576.0);
-    let _ = a;
-    let _ = p.mouse_up(220.0, 576.0);
-    assert!(p.s.card_secs > 8 && p.s.card_secs < 14, "card_secs = {}", p.s.card_secs);
-    // the third segment
-    let s = click(&mut p, 340.0, 755.0).expect("segment");
+    // Notifications page: the card-time slider is the third row (y = 86 + 2 * 74 = 234 .. 306)
+    let _ = click(&mut p, 100.0, 84.0 + 84.0 + 19.0);
+    p.render();
+    // the slider's track is right of the middle of the row; find it by dragging across the whole width
+    let _ = p.mouse_down(700.0, 270.0);
+    let _ = p.mouse_move(10_000.0, 270.0);
+    let _ = p.mouse_up(10_000.0, 270.0);
+    assert_eq!(p.s.card_secs, 20, "dragged to the right end");
+    let _ = p.mouse_down(700.0, 270.0);
+    let _ = p.mouse_move(0.0, 270.0);
+    let _ = p.mouse_up(0.0, 270.0);
+    assert_eq!(p.s.card_secs, 2, "dragged to the left end");
+    // Windows page, third option
+    let _ = click(&mut p, 100.0, 84.0 + 126.0 + 19.0);
+    p.render();
+    let s = click(&mut p, 500.0, 86.0 + 68.0 + 2.0 * 42.0 + 20.0).expect("radio option");
     assert_eq!(s.maximized, MaxMode::Normal);
-    // a click that goes down on one thing and up on another does nothing
+    // pressing on one thing and releasing on another does nothing
     p.render();
-    let _ = p.mouse_down(200.0, 231.0);
-    assert!(p.mouse_up(200.0, 600.0).is_none());
+    let _ = p.mouse_down(500.0, 86.0 + 68.0 + 20.0);
+    assert!(p.mouse_up(500.0, 20.0).is_none());
 }
 
 #[test]
-fn header_and_close() {
-    let mut p = Panel::new(1.0, Settings::default(), false, 900.0);
+fn quit_and_resize() {
+    let mut p = panel();
     p.render();
-    assert!(matches!(p.mouse_down(100.0, 30.0), Some(Act::DragWindow)));
-    let _ = p.mouse_down(396.0, 40.0);
-    assert!(matches!(p.mouse_up(396.0, 40.0), Some(Act::Close)));
-}
-
-#[test]
-fn scrolls_when_short() {
-    let mut p = Panel::new(1.0, Settings::default(), false, 500.0);
-    assert_eq!(p.size_px().1, 500);
+    let _ = p.mouse_down(100.0, 600.0 - 52.0 + 19.0);
+    assert!(matches!(p.mouse_up(100.0, 600.0 - 52.0 + 19.0), Some(Act::Quit)));
+    p.resize(1400, 900);
     p.render();
-    p.wheel(-3.0);
+    p.resize(700, 460);
+    p.wheel(-5.0);
     p.render();
-    p.wheel(-30.0);
-    p.render(); // (does not run past the end)
+    assert_eq!(p.size_px(), (700, 460));
 }

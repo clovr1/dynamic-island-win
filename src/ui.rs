@@ -628,6 +628,11 @@ impl Ui {
     }
 
     /// `Some((x, y))` in window pixels while the mouse is over the island, `None` when it left.
+    /// Does the island think the mouse is over it?
+    pub fn has_cursor(&self) -> bool {
+        self.cursor.is_some()
+    }
+
     pub fn set_cursor(&mut self, c: Option<(f32, f32)>) {
         self.cursor = c;
     }

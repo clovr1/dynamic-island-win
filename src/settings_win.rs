@@ -8,15 +8,15 @@ use std::ffi::c_void;
 use std::time::Instant;
 use windows::core::w;
 use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE};
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::HiDpi::GetDpiForSystem;
+use windows::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForSystem};
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const TIMER_ANIM: usize = 1;
-const VK_ESCAPE: usize = 0x1B;
 
 struct Win {
     hwnd: HWND,
@@ -97,7 +97,7 @@ pub fn refresh(s: &Settings, autostart: bool) {
 }
 
 impl Win {
-    /// Draw the panel and hand the picture to Windows.
+    /// Draw the panel and show it in the window.
     fn draw(&mut self) {
         let pm = self.panel.render();
         let (pw, ph) = (pm.width() as i32, pm.height() as i32);
@@ -107,12 +107,11 @@ impl Win {
                 d[0] = s[2];
                 d[1] = s[1];
                 d[2] = s[0];
-                d[3] = s[3];
+                d[3] = 255;
             }
-            let size = SIZE { cx: pw, cy: ph };
-            let src = POINT { x: 0, y: 0 };
-            let blend = BLENDFUNCTION { BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: AC_SRC_ALPHA as u8 };
-            let _ = UpdateLayeredWindow(self.hwnd, None, None, Some(&size), self.dc, Some(&src), COLORREF(0), Some(&blend), ULW_ALPHA);
+            let wdc = GetDC(self.hwnd);
+            let _ = BitBlt(wdc, 0, 0, pw, ph, self.dc, 0, 0, SRCCOPY);
+            ReleaseDC(self.hwnd, wdc);
         }
         // switches that are still sliding need a 60 fps timer
         let moving = self.panel.animating();
@@ -130,7 +129,37 @@ impl Win {
     }
 }
 
-pub fn open(current: &Settings, autostart: bool) {
+fn make_dib(dc: HDC, w: i32, h: i32) -> Option<(HBITMAP, *mut u8)> {
+    unsafe {
+        let bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: w, biHeight: -h, biPlanes: 1, biBitCount: 32, biCompression: BI_RGB.0, ..Default::default() },
+            ..Default::default()
+        };
+        let mut bits: *mut c_void = std::ptr::null_mut();
+        let bmp = CreateDIBSection(dc, &bmi, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
+        Some((bmp, bits as *mut u8))
+    }
+}
+
+impl Win {
+    /// The window's inside changed size.
+    fn resize(&mut self, w: i32, h: i32) {
+        if w < 2 || h < 2 {
+            return;
+        }
+        self.panel.resize(w as u32, h as u32);
+        if let Some((bmp, bits)) = make_dib(self.dc, w, h) {
+            unsafe {
+                SelectObject(self.dc, bmp);
+                let _ = DeleteObject(self.bmp);
+            }
+            self.bmp = bmp;
+            self.bits = bits;
+        }
+    }
+}
+
+pub fn open(current: &Settings, autostart: bool, icon: Option<HICON>) {
     if let Some(h) = handle() {
         unsafe {
             let _ = ShowWindow(h, SW_SHOW);
@@ -141,37 +170,48 @@ pub fn open(current: &Settings, autostart: bool) {
     unsafe {
         let inst = GetModuleHandleW(None).unwrap_or_default();
         let class = w!("DynamicIslandSettingsPanel");
-        let wc = WNDCLASSW { lpfnWndProc: Some(proc), hInstance: inst.into(), lpszClassName: class, hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(), ..Default::default() };
+        let wc = WNDCLASSW { lpfnWndProc: Some(proc), hInstance: inst.into(), lpszClassName: class, hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(), hIcon: icon.unwrap_or_default(), ..Default::default() };
         RegisterClassW(&wc);
 
-        let scale = GetDpiForSystem() as f32 / 96.0;
+        let dpi = GetDpiForSystem();
+        let scale = dpi as f32 / 96.0;
         let (sw, sh) = (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
-        // at most 88 % of the screen height (the rest scrolls)
-        let mut panel = Panel::new(scale, current.clone(), autostart, sh as f32 * 0.88 / scale);
+        // an ordinary window: title bar with minimize / maximize / close, can be resized; 900 x 600 inside (less on a small screen)
+        let style = WS_OVERLAPPEDWINDOW;
+        let want_w = (Panel::DEFAULT_SIZE.0 * scale).min(sw as f32 * 0.92);
+        let want_h = (Panel::DEFAULT_SIZE.1 * scale).min(sh as f32 * 0.88);
+        let mut r = RECT { left: 0, top: 0, right: want_w as i32, bottom: want_h as i32 };
+        let _ = AdjustWindowRectExForDpi(&mut r, style, false, WINDOW_EX_STYLE(0), dpi);
+        let (ow, oh) = (r.right - r.left, r.bottom - r.top);
+        let Ok(hwnd) = CreateWindowExW(WINDOW_EX_STYLE(0), class, w!("Dynamic Island - Settings"), style, (sw - ow) / 2, ((sh - oh) / 2).max(0), ow, oh, None, None, inst, None) else {
+            return;
+        };
+        // dark title bar (and its colour like the window), where Windows supports it
+        let dark = BOOL(1);
+        let _ = DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(20), &dark as *const BOOL as *const c_void, 4);
+        let caption: u32 = 0x0020_2020;
+        let _ = DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(35), &caption as *const u32 as *const c_void, 4);
+        if let Some(i) = icon {
+            SendMessageW(hwnd, WM_SETICON, WPARAM(0), LPARAM(i.0 as isize));
+            SendMessageW(hwnd, WM_SETICON, WPARAM(1), LPARAM(i.0 as isize));
+        }
+        let mut cr = RECT::default();
+        let _ = GetClientRect(hwnd, &mut cr);
+        let (pw, ph) = ((cr.right - cr.left).max(2), (cr.bottom - cr.top).max(2));
+        let mut panel = Panel::new(scale, current.clone(), autostart, (pw as u32, ph as u32));
         let (st, ready) = STATUS.with(|s| s.borrow().clone());
         if !st.is_empty() {
             panel.set_status(&st, ready);
         }
-        let (pw, ph) = panel.size_px();
-        let (pw, ph) = (pw as i32, ph as i32);
-
-        let Ok(hwnd) = CreateWindowExW(WS_EX_LAYERED, class, w!("Dynamic Island - Settings"), WS_POPUP | WS_MINIMIZEBOX | WS_SYSMENU, (sw - pw) / 2, ((sh - ph) / 2).max(0), pw, ph, None, None, inst, None) else {
-            return;
-        };
         let screen = GetDC(None);
         let dc = CreateCompatibleDC(screen);
         ReleaseDC(None, screen);
-        let bmi = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: pw, biHeight: -ph, biPlanes: 1, biBitCount: 32, biCompression: BI_RGB.0, ..Default::default() },
-            ..Default::default()
-        };
-        let mut bits: *mut c_void = std::ptr::null_mut();
-        let Ok(bmp) = CreateDIBSection(dc, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) else {
+        let Some((bmp, bits)) = make_dib(dc, pw, ph) else {
             let _ = DestroyWindow(hwnd);
             return;
         };
         SelectObject(dc, bmp);
-        WIN.with(|w| *w.borrow_mut() = Some(Win { hwnd, panel, dc, bmp, bits: bits as *mut u8, tracking: false, timer: false, last: Instant::now() }));
+        WIN.with(|w| *w.borrow_mut() = Some(Win { hwnd, panel, dc, bmp, bits, tracking: false, timer: false, last: Instant::now() }));
         with_win(|w| w.draw());
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = SetForegroundWindow(hwnd);
@@ -179,7 +219,7 @@ pub fn open(current: &Settings, autostart: bool) {
 }
 
 /// What the panel asked for.
-fn handle_act(hwnd: HWND, act: Act) {
+fn handle_act(act: Act) {
     match act {
         Act::Changed(s) => emit(Action::Changed(s)),
         Act::Autostart(on) => emit(Action::Autostart(on)),
@@ -193,14 +233,6 @@ fn handle_act(hwnd: HWND, act: Act) {
         Act::Reset => emit(Action::Reset),
         Act::Test => emit(Action::Test),
         Act::Quit => emit(Action::Quit),
-        Act::Close => unsafe {
-            let _ = DestroyWindow(hwnd);
-        },
-        Act::DragWindow => unsafe {
-            let _ = ReleaseCapture();
-            with_win(|w| w.panel.cancel());
-            SendMessageW(hwnd, WM_NCLBUTTONDOWN, WPARAM(HTCAPTION as usize), LPARAM(0));
-        },
     }
 }
 
@@ -208,10 +240,36 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
     let xy = |lp: LPARAM| ((lp.0 & 0xFFFF) as i16 as f32, ((lp.0 >> 16) & 0xFFFF) as i16 as f32);
     unsafe {
         match msg {
-            // the window is a popup with no frame: every pixel belongs to the client area
-            WM_NCHITTEST => {
-                let r = DefWindowProcW(hwnd, msg, wp, lp);
-                return if r.0 == HTNOWHERE as isize { LRESULT(HTCLIENT as isize) } else { r };
+            WM_ERASEBKGND => return LRESULT(1),
+            WM_PAINT => {
+                let mut ps = PAINTSTRUCT::default();
+                let hdc = BeginPaint(hwnd, &mut ps);
+                with_win(|w| {
+                    let (pw, ph) = w.panel.size_px();
+                    let _ = BitBlt(hdc, 0, 0, pw as i32, ph as i32, w.dc, 0, 0, SRCCOPY);
+                });
+                let _ = EndPaint(hwnd, &ps);
+                return LRESULT(0);
+            }
+            WM_SIZE => {
+                if wp.0 != 1 {
+                    // (1 = minimized)
+                    let (cw, ch) = ((lp.0 & 0xFFFF) as i32, ((lp.0 >> 16) & 0xFFFF) as i32);
+                    with_win(|w| {
+                        w.resize(cw, ch);
+                        w.draw();
+                    });
+                }
+                return LRESULT(0);
+            }
+            WM_GETMINMAXINFO => {
+                let dpi = GetDpiForSystem();
+                let k = dpi as f32 / 96.0;
+                let mut r = RECT { left: 0, top: 0, right: (Panel::MIN_SIZE.0 * k) as i32, bottom: (Panel::MIN_SIZE.1 * k) as i32 };
+                let _ = AdjustWindowRectExForDpi(&mut r, WS_OVERLAPPEDWINDOW, false, WINDOW_EX_STYLE(0), dpi);
+                let info = &mut *(lp.0 as *mut MINMAXINFO);
+                info.ptMinTrackSize = POINT { x: r.right - r.left, y: r.bottom - r.top };
+                return LRESULT(0);
             }
             WM_MOUSEMOVE => {
                 let (x, y) = xy(lp);
@@ -227,7 +285,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 })
                 .flatten();
                 if let Some(a) = act {
-                    handle_act(hwnd, a);
+                    handle_act(a);
                     with_win(|w| w.draw());
                 }
                 return LRESULT(0);
@@ -250,7 +308,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 })
                 .flatten();
                 if let Some(a) = act {
-                    handle_act(hwnd, a);
+                    handle_act(a);
                     with_win(|w| w.draw());
                 }
                 return LRESULT(0);
@@ -260,7 +318,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 let _ = ReleaseCapture();
                 let act = with_win(|w| w.panel.mouse_up(x, y)).flatten();
                 if let Some(a) = act {
-                    handle_act(hwnd, a);
+                    handle_act(a);
                 }
                 with_win(|w| w.draw());
                 return LRESULT(0);
@@ -281,10 +339,6 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                         return LRESULT(1);
                     }
                 }
-            }
-            WM_KEYDOWN if wp.0 == VK_ESCAPE => {
-                let _ = DestroyWindow(hwnd);
-                return LRESULT(0);
             }
             WM_TIMER if wp.0 == TIMER_ANIM => {
                 with_win(|w| {
