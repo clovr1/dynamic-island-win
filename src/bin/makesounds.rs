@@ -2,7 +2,7 @@
 //! Run: cargo run --release --bin makesounds
 use std::f32::consts::TAU;
 
-const SR: u32 = 44_100;
+const SR: u32 = 22_050;
 
 fn ease(x: f32) -> f32 {
     let x = x.clamp(0.0, 1.0);
@@ -204,8 +204,58 @@ fn pack_ios(dir: &str) {
     write_wav(&format!("{dir}/skip.wav"), &finish(k, 0.17));
 }
 
+/// Two notes one after the other (rising for "on", falling for "off").
+fn pair(first: f32, second: f32, gap: f32, mk: fn(f32, f32, f32) -> Vec<f32>, peak: f32) -> Vec<i16> {
+    let mut s = mk(first, 0.4, 1.0);
+    mix_at(&mut s, &mk(second, 0.45, 0.85), gap);
+    finish(s, peak)
+}
+
 fn main() {
     let dir = "assets/sounds";
     std::fs::create_dir_all(dir).unwrap();
     pack_ios(dir);
+    // notification: "Milestone"-like (original): a short, bright, rising little tune, getting quieter towards the top
+    let mut n = Vec::new();
+    for (i, (f, a)) in [(1046.5f32, 1.0f32), (1318.5, 0.85), (1568.0, 0.7), (2093.0, 0.5)].iter().enumerate() {
+        mix_at(&mut n, &bell(*f, 0.32, *a), i as f32 * 0.075);
+    }
+    write_wav(&format!("{dir}/notify.wav"), &finish(n, 0.2));
+
+    // status pills: each has its own sound, in two families. Connections (Wi-Fi, Bluetooth, hotspot, cellular) are two bright notes
+    // (rising = on, falling = off); modes (airplane, Do Not Disturb, night light, energy saver) are warmer and lower.
+    let connect: [(&str, f32, f32); 4] = [("wifi", 659.25, 880.0), ("bluetooth", 784.0, 1174.66), ("hotspot", 523.25, 783.99), ("cellular", 587.33, 740.0)];
+    for (key, a, b) in connect {
+        write_wav(&format!("{dir}/status_{key}_on.wav"), &pair(a, b, 0.085, bell, 0.16));
+        write_wav(&format!("{dir}/status_{key}_off.wav"), &pair(b * 0.9, a * 0.9, 0.085, bell, 0.12));
+    }
+    // airplane: three soft notes, falling (on) / rising (off)
+    let tri = |a: f32, b: f32, c: f32, peak: f32| {
+        let mut s = pluck(a, 0.3, 1.0);
+        mix_at(&mut s, &pluck(b, 0.3, 0.85), 0.1);
+        mix_at(&mut s, &pluck(c, 0.4, 0.7), 0.2);
+        finish(s, peak)
+    };
+    write_wav(&format!("{dir}/status_airplane_on.wav"), &tri(440.0, 329.63, 220.0, 0.16));
+    write_wav(&format!("{dir}/status_airplane_off.wav"), &tri(220.0, 329.63, 440.0, 0.14));
+    // Do Not Disturb: a low, calm pair (down = on, up = off)
+    write_wav(&format!("{dir}/status_dnd_on.wav"), &pair(392.0, 293.66, 0.11, pluck, 0.15));
+    write_wav(&format!("{dir}/status_dnd_off.wav"), &pair(293.66, 392.0, 0.11, pluck, 0.13));
+    // night light: one warm note that glides up (on) or down (off)
+    write_wav(&format!("{dir}/status_nightlight_on.wav"), &finish(bloop(300.0, 470.0, 0.12, 0.3, 0.09, 1.0), 0.16));
+    write_wav(&format!("{dir}/status_nightlight_off.wav"), &finish(bloop(470.0, 280.0, 0.12, 0.3, 0.08, 1.0), 0.13));
+    // energy saver: one mellow note (on), a lower one (off)
+    write_wav(&format!("{dir}/status_energy_on.wav"), &finish(pluck(523.25, 0.4, 1.0), 0.16));
+    write_wav(&format!("{dir}/status_energy_off.wav"), &finish(pluck(392.0, 0.35, 1.0), 0.13));
+    // battery: charging = "bloop - ding"; unplugged = the same turned around; low battery = two low, gentle taps
+    let mut c = bloop(260.0, 430.0, 0.07, 0.14, 0.04, 0.9);
+    mix_at(&mut c, &bell(880.0, 0.45, 0.9), 0.1);
+    write_wav(&format!("{dir}/battery_charging.wav"), &finish(c, 0.16));
+    let mut u = bell(784.0, 0.3, 0.9);
+    mix_at(&mut u, &bloop(430.0, 240.0, 0.07, 0.16, 0.045, 0.9), 0.1);
+    write_wav(&format!("{dir}/battery_unplugged.wav"), &finish(u, 0.14));
+    let mut l = pluck(329.63, 0.2, 1.0);
+    mix_at(&mut l, &pluck(329.63, 0.25, 0.9), 0.16);
+    write_wav(&format!("{dir}/battery_low.wav"), &finish(l, 0.18));
+    let _ = std::fs::remove_file(format!("{dir}/status.wav"));
 }

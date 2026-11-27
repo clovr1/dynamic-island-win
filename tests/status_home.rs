@@ -92,7 +92,21 @@ fn sounds_are_asked_for() {
     run(&mut ui, 0.5);
     assert!(ui.take_sounds().contains(&Sound::Notify));
     ui.push_status(StatusData::Sys { key: "wifi".into(), on: true });
-    assert!(ui.take_sounds().contains(&Sound::Status));
+    assert!(ui.take_sounds().iter().any(|s| matches!(s, Sound::Status(_))));
+    // every pill has its own sound: wifi on / off, battery charging / unplugged / low are all different
+    use island::ui::status_sound_code as code;
+    let a = code(&StatusData::Sys { key: "wifi".into(), on: true });
+    let b = code(&StatusData::Sys { key: "wifi".into(), on: false });
+    let c = code(&StatusData::Sys { key: "bluetooth".into(), on: true });
+    let d = code(&StatusData::Battery { label: "x".into(), level: 50, charging: true, low: false });
+    let e = code(&StatusData::Battery { label: "x".into(), level: 10, charging: false, low: true });
+    let all = [a, b, c, d, e];
+    for i in 0..all.len() {
+        for j in i + 1..all.len() {
+            assert_ne!(all[i], all[j]);
+        }
+    }
+    assert!(all.iter().all(|c| *c < 19));
     // hovering (opening / closing the island) is silent
     let mut ui = Ui::new(1.0);
     ui.set_settings(&Settings::default());

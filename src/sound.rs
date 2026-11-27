@@ -7,10 +7,21 @@ use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT};
 
 static NOTIFY: &[u8] = include_bytes!("../assets/sounds/notify.wav");
-static STATUS: &[u8] = include_bytes!("../assets/sounds/status.wav");
 static PAUSE: &[u8] = include_bytes!("../assets/sounds/pause.wav");
 static PLAY: &[u8] = include_bytes!("../assets/sounds/play.wav");
 static SKIP: &[u8] = include_bytes!("../assets/sounds/skip.wav");
+
+macro_rules! status {
+    ($($f:literal),*) => { [$(include_bytes!(concat!("../assets/sounds/", $f, ".wav")) as &[u8]),*] };
+}
+
+/// The status pills' sounds, in the order of `ui::status_sound_code`: for each of wifi, bluetooth, hotspot, cellular, airplane, dnd,
+/// nightlight, energy: off then on; then the three battery sounds (charging, unplugged, low).
+static STATUS: [&[u8]; 19] = status!(
+    "status_wifi_off", "status_wifi_on", "status_bluetooth_off", "status_bluetooth_on", "status_hotspot_off", "status_hotspot_on",
+    "status_cellular_off", "status_cellular_on", "status_airplane_off", "status_airplane_on", "status_dnd_off", "status_dnd_on",
+    "status_nightlight_off", "status_nightlight_on", "status_energy_off", "status_energy_on", "battery_charging", "battery_unplugged", "battery_low"
+);
 
 /// The buffers Windows may still be playing from (it reads them while it plays): the last few are kept.
 static KEEP: Mutex<Vec<Vec<u8>>> = Mutex::new(Vec::new());
@@ -22,7 +33,7 @@ pub fn play(s: Sound, volume: u32) {
     }
     let src = match s {
         Sound::Notify => NOTIFY,
-        Sound::Status => STATUS,
+        Sound::Status(c) => STATUS[(c as usize).min(STATUS.len() - 1)],
         Sound::Pause => PAUSE,
         Sound::Play => PLAY,
         Sound::Skip => SKIP,

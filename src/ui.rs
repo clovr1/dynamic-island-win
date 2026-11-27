@@ -66,11 +66,26 @@ pub enum Sound {
     Open,
     Close,
     Notify,
-    Status,
+    /// a status pill: which one (see `status_sound_code`)
+    Status(u8),
     /// the play / pause / skip buttons
     Pause,
     Play,
     Skip,
+}
+
+/// Which sound a status pill makes: 0..16 = wifi, bluetooth, hotspot, cellular, airplane, dnd, nightlight, energy (off, on each);
+/// 16 = charging, 17 = unplugged, 18 = low battery.
+pub fn status_sound_code(st: &StatusData) -> u8 {
+    match st {
+        StatusData::Sys { key, on } => {
+            let i = ["wifi", "bluetooth", "hotspot", "cellular", "airplane", "dnd", "nightlight", "energy"].iter().position(|k| *k == key).unwrap_or(0) as u8;
+            i * 2 + *on as u8
+        }
+        StatusData::Battery { low: true, .. } => 18,
+        StatusData::Battery { charging: true, .. } => 16,
+        StatusData::Battery { .. } => 17,
+    }
 }
 
 /// A system change shown as the slim status pill.
@@ -881,7 +896,8 @@ impl Ui {
             }
             self.sys_last.push((key.clone(), *on, Instant::now()));
         }
-        self.sound(Sound::Status);
+        let code = status_sound_code(&st);
+        self.sound(Sound::Status(code));
         let n = Notif { app: String::new(), aumid: String::new(), title: String::new(), body: String::new(), icon: None, count: 1, status: Some(st) };
         self.queue.retain(|q| q.status.is_none());
         match &mut self.card {
