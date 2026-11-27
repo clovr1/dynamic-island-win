@@ -108,7 +108,8 @@ impl Settings {
         // an "owner/repo" is letters, digits, - _ . and one slash; anything else is dropped
         let ok = self.update_repo.split('/').count() == 2 && self.update_repo.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c));
         if !ok {
-            self.update_repo.clear();
+            // an empty or odd value (an old settings file) falls back to the project's own repository
+            self.update_repo = Settings::default().update_repo;
         }
     }
 
@@ -160,7 +161,7 @@ mod tests {
         assert_eq!(s.card_secs, 20);
         assert_eq!(s.scale_pct, 80);
         assert_eq!(s.maximized, MaxMode::Notch);
-        assert_eq!(s.update_repo, "");
+        assert_eq!(s.update_repo, Settings::default().update_repo);
         assert!(s.notifications);
     }
 }
