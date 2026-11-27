@@ -201,7 +201,7 @@ pub fn open(current: &Settings, autostart: bool, icon: Option<HICON>) {
         let mut r = RECT { left: 0, top: 0, right: want_w as i32, bottom: want_h as i32 };
         let _ = AdjustWindowRectExForDpi(&mut r, style, false, WINDOW_EX_STYLE(0), dpi);
         let (ow, oh) = (r.right - r.left, r.bottom - r.top);
-        let Ok(hwnd) = CreateWindowExW(WINDOW_EX_STYLE(0), class, w!("Dynamic Island - Settings"), style, (sw - ow) / 2, ((sh - oh) / 2).max(0), ow, oh, None, None, inst, None) else {
+        let Ok(hwnd) = CreateWindowExW(WINDOW_EX_STYLE(0), class, w!("Bloop - Settings"), style, (sw - ow) / 2, ((sh - oh) / 2).max(0), ow, oh, None, None, inst, None) else {
             return;
         };
         // dark title bar (and its colour like the window), where Windows supports it
@@ -375,7 +375,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
             WM_CLOSE => {
                 let dirty = with_win(|w| w.panel.dirty()).unwrap_or(false);
                 if dirty {
-                    let r = MessageBoxW(hwnd, w!("Save your changes to the island?"), w!("Dynamic Island - Settings"), MB_YESNOCANCEL | MB_ICONQUESTION);
+                    let r = MessageBoxW(hwnd, w!("Save your changes to the island?"), w!("Bloop - Settings"), MB_YESNOCANCEL | MB_ICONQUESTION);
                     if r == IDCANCEL {
                         return LRESULT(0);
                     }

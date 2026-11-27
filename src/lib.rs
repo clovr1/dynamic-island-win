@@ -18,6 +18,8 @@ pub mod sound;
 #[cfg(windows)]
 pub mod sys;
 #[cfg(windows)]
+pub mod volume;
+#[cfg(windows)]
 pub mod settings_win;
 #[cfg(windows)]
 pub mod update;

@@ -93,14 +93,15 @@ fn sounds_are_asked_for() {
     assert!(ui.take_sounds().contains(&Sound::Notify));
     ui.push_status(StatusData::Sys { key: "wifi".into(), on: true });
     assert!(ui.take_sounds().contains(&Sound::Status));
-    // opening and closing the home view (a fresh island: no card is in the way)
+    // hovering (opening / closing the island) is silent
     let mut ui = Ui::new(1.0);
     ui.set_settings(&Settings::default());
     ui.set_cursor(Some((235.0, 28.0)));
     run(&mut ui, 1.5);
     ui.set_cursor(None);
     run(&mut ui, 2.0);
-    let s = ui.take_sounds();
-    assert!(s.contains(&Sound::Open) && s.contains(&Sound::Close), "{s:?}");
-    assert!(ui.take_sounds().is_empty(), "taken once");
+    assert!(ui.take_sounds().is_empty(), "no sound for hovering");
+    // the buttons do make a sound
+    ui.play_sound(Sound::Skip);
+    assert_eq!(ui.take_sounds(), vec![Sound::Skip]);
 }

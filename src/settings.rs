@@ -40,6 +40,8 @@ pub struct Settings {
     pub sounds: bool,
     /// 0..=100
     pub volume: u32,
+    /// a volume slider for the music in the open player
+    pub player_volume: bool,
 }
 
 impl Default for Settings {
@@ -62,7 +64,8 @@ impl Default for Settings {
             status_pills: true,
             dnd_quiet: true,
             sounds: true,
-            volume: 40,
+            volume: 30,
+            player_volume: true,
         }
     }
 }
@@ -111,7 +114,8 @@ impl Settings {
                 "update_repo" => s.update_repo = v.to_string(),
                 "status_pills" => s.status_pills = parse_bool(v).unwrap_or(s.status_pills),
                 "sounds" => s.sounds = parse_bool(v).unwrap_or(s.sounds),
-                "volume" => s.volume = v.trim().parse().unwrap_or(40),
+                "player_volume" => s.player_volume = parse_bool(v).unwrap_or(s.player_volume),
+                "volume" => s.volume = v.trim().parse().unwrap_or(30),
                 "dnd_quiet" => s.dnd_quiet = parse_bool(v).unwrap_or(s.dnd_quiet),
                 "theme" => s.theme = v.trim().parse().unwrap_or(0),
                 _ => {}
@@ -138,9 +142,9 @@ impl Settings {
     pub fn to_text(&self) -> String {
         let b = |v: bool| if v { "yes" } else { "no" };
         format!(
-            "# Dynamic Island settings (you can edit this file; the island reads it when it starts)\n\
+            "# Bloop settings (you can edit this file; the island reads it when it starts)\n\
              show_music_pill = {}\nhide_when_player_front = {}\nnotifications = {}\nuse_bubble = {}\ncard_secs = {}\nlyrics_button = {}\n\
-             maximized = {}\nfullscreen_hide = {}\nscale_pct = {}\nspeed_pct = {}\naccent_eq = {}\ncheck_updates = {}\nupdate_repo = {}\ntheme = {}\nstatus_pills = {}\ndnd_quiet = {}\nsounds = {}\nvolume = {}\n",
+             maximized = {}\nfullscreen_hide = {}\nscale_pct = {}\nspeed_pct = {}\naccent_eq = {}\ncheck_updates = {}\nupdate_repo = {}\ntheme = {}\nstatus_pills = {}\ndnd_quiet = {}\nsounds = {}\nvolume = {}\nplayer_volume = {}\n",
             b(self.show_music_pill),
             b(self.hide_when_player_front),
             b(self.notifications),
@@ -162,7 +166,8 @@ impl Settings {
             b(self.status_pills),
             b(self.dnd_quiet),
             b(self.sounds),
-            self.volume
+            self.volume,
+            b(self.player_volume)
         )
     }
 }

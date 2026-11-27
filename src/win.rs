@@ -87,7 +87,7 @@ const RUN_NAME: PCWSTR = w!("DynamicIsland");
 
 pub fn log(msg: &str) {
     use std::io::Write;
-    let path = std::env::temp_dir().join("dynamic-island-native.log");
+    let path = std::env::temp_dir().join("bloop.log");
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
         let _ = writeln!(f, "{msg}");
     }
@@ -255,6 +255,7 @@ impl App {
     /// Full screen / maximized window: asked about once a second (Windows has no cheaper way to tell us).
     fn check_env(&mut self) {
         self.update_clock();
+        self.refresh_volume();
         let mut env = self.ui.env();
         unsafe {
             let mut fs = false;
@@ -320,7 +321,7 @@ impl App {
 
     fn test_notification(&mut self) {
         self.ui.push_notification(crate::ui::NotifData {
-            app: "Dynamic Island".into(),
+            app: "Bloop".into(),
             aumid: String::new(),
             title: "Test notification".into(),
             body: "If you can see this, cards work".into(),
@@ -353,8 +354,27 @@ impl App {
             SetCapture(self.hwnd);
         }
         self.ui.mouse_down(x, y);
+        self.apply_volume_request();
         self.present();
         self.kick();
+    }
+
+    /// The volume slider was dragged: tell Windows.
+    fn apply_volume_request(&mut self) {
+        if let Some(f) = self.ui.take_volume_request() {
+            let app = self.shared.app.lock().map(|g| g.clone()).unwrap_or_default();
+            crate::volume::set(&app, f);
+        }
+    }
+
+    /// Ask Windows for the music app's volume (only while the player is open, once a second).
+    fn refresh_volume(&mut self) {
+        if self.ui.wants_volume() {
+            let app = self.shared.app.lock().map(|g| g.clone()).unwrap_or_default();
+            if let Some(v) = crate::volume::get(&app) {
+                self.ui.set_volume(v);
+            }
+        }
     }
 
     /// The mouse went up: the click happens now (if it is still on what it went down on).
@@ -383,6 +403,7 @@ impl App {
                 open_app(&aumid);
             }
             Hit::HomeClear => self.ui.clear_log(),
+            Hit::Volume(_) => self.apply_volume_request(),
             Hit::LyricsToggle => {
                 self.ui.toggle_lyrics();
                 self.start_lyrics_lookup();
@@ -391,9 +412,17 @@ impl App {
             Hit::PlayPause => {
                 media::command(&self.shared, Cmd::Toggle);
                 self.ui.toggle_playing_locally();
+                let now_playing = self.ui.is_playing();
+                self.ui.play_sound(if now_playing { crate::ui::Sound::Play } else { crate::ui::Sound::Pause });
             }
-            Hit::Prev => media::command(&self.shared, Cmd::Prev),
-            Hit::Next => media::command(&self.shared, Cmd::Next),
+            Hit::Prev => {
+                media::command(&self.shared, Cmd::Prev);
+                self.ui.play_sound(crate::ui::Sound::Skip);
+            }
+            Hit::Next => {
+                media::command(&self.shared, Cmd::Next);
+                self.ui.play_sound(crate::ui::Sound::Skip);
+            }
             Hit::Seek(f) => media::command(&self.shared, Cmd::Seek(f as f64 * self.ui.duration())),
             Hit::OpenSource => {
                 let app = self.shared.app_raw.lock().map(|g| g.clone()).unwrap_or_default();
@@ -517,7 +546,7 @@ impl App {
                 settings_win::set_update_status(&format!("Version {ver} is downloaded and ready."), true);
                 if first {
                     self.ui.push_notification(crate::ui::NotifData {
-                        app: "Dynamic Island".into(),
+                        app: "Bloop".into(),
                         aumid: UPDATE_AUMID.into(),
                         title: "Update ready".into(),
                         body: format!("Version {ver} - click here to restart and install"),
@@ -531,7 +560,7 @@ impl App {
     }
 
     fn say(&mut self, text: &str) {
-        self.ui.push_notification(crate::ui::NotifData { app: "Dynamic Island".into(), aumid: String::new(), title: "Updates".into(), body: text.into(), icon: None });
+        self.ui.push_notification(crate::ui::NotifData { app: "Bloop".into(), aumid: String::new(), title: "Updates".into(), body: text.into(), icon: None });
         self.present();
         self.kick();
     }
@@ -748,7 +777,7 @@ fn tray_data(hwnd: HWND) -> NOTIFYICONDATAW {
     let mut nid = NOTIFYICONDATAW { cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32, hWnd: hwnd, uID: 1, ..Default::default() };
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     nid.uCallbackMessage = WM_TRAY;
-    for (i, c) in "Dynamic Island".encode_utf16().enumerate() {
+    for (i, c) in "Bloop".encode_utf16().enumerate() {
         nid.szTip[i] = c;
     }
     nid
@@ -801,7 +830,7 @@ fn pick_exe() -> Option<std::path::PathBuf> {
     use windows::Win32::UI::Controls::Dialogs::{GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST, OPENFILENAMEW};
     unsafe {
         let mut buf = [0u16; 1040];
-        let filter: Vec<u16> = "Dynamic Island program (*.exe)\0*.exe\0\0".encode_utf16().collect();
+        let filter: Vec<u16> = "Bloop program (*.exe)\0*.exe\0\0".encode_utf16().collect();
         let mut ofn = OPENFILENAMEW {
             lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
             hwndOwner: settings_win::handle().unwrap_or_default(),
@@ -881,6 +910,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
                     let (x, y) = xy(lp);
                     a.ui.set_cursor(Some((x, y)));
                     a.ui.mouse_move(x);
+                    a.apply_volume_request();
                     a.kick();
                 });
                 return LRESULT(0);
@@ -1040,7 +1070,7 @@ pub fn run() {
         let hwnd = match CreateWindowExW(
             WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             class,
-            w!("Dynamic Island"),
+            w!("Bloop"),
             WS_POPUP,
             (sw - pw) / 2,
             0,

@@ -35,7 +35,7 @@ pub fn pick_asset(json: &serde_json::Value) -> Option<(String, Option<String>)> 
         let name = a.get("name").and_then(|n| n.as_str()).unwrap_or("").to_lowercase();
         if name.ends_with(".exe") {
             // prefer the one that looks like the app itself
-            if best.is_none() || name.contains("island") {
+            if best.is_none() || name.contains("island") || name.contains("bloop") {
                 best = Some(a);
             }
         }

@@ -67,6 +67,10 @@ pub enum Sound {
     Close,
     Notify,
     Status,
+    /// the play / pause / skip buttons
+    Pause,
+    Play,
+    Skip,
 }
 
 /// A system change shown as the slim status pill.
@@ -161,6 +165,8 @@ pub enum Hit {
     LyricLine(f32),
     /// the small pill, or the cover / title in the player: bring the music app forward
     OpenSource,
+    /// the volume slider of the player: fraction 0..1 along it
+    Volume(f32),
     /// a line of the notification list (home view)
     HomeRow(usize),
     /// "Clear" in the home view
@@ -243,6 +249,7 @@ pub struct Ui {
     /// 1 while the player is open, 0 otherwise: the open player's content only shows while the island is really "open" (a tall card
     /// that shrinks back must not show it)
     open_k: Tween,
+    vol_k: Tween,
     /// the line shown inside the small pill, and how wide the pill is for it
     line_text: String,
     line_w: f32,
@@ -286,6 +293,10 @@ pub struct Ui {
     open_block: bool,
     /// a click on the card unfolded its long message
     card_expanded: bool,
+    /// the volume of the music app, 0..1 (read from Windows), and a drag in progress
+    vol: f32,
+    vol_drag: Option<f32>,
+    vol_req: Option<f32>,
     sounds: Vec<Sound>,
     open_prev: bool,
     ghost: Option<Ghost>,
@@ -441,6 +452,7 @@ impl Ui {
             lyr_scroll: Tween::new(0.0),
             lyr_k: Tween::new(0.0),
             open_k: Tween::new(0.0),
+            vol_k: Tween::new(0.0),
             line_text: String::new(),
             line_w: 240.0,
             notch_line_w: NOTCH_W,
@@ -471,6 +483,9 @@ impl Ui {
             clock: String::new(),
             open_block: false,
             card_expanded: false,
+            vol: 0.5,
+            vol_drag: None,
+            vol_req: None,
             sounds: Vec::new(),
             open_prev: false,
             ghost: None,
@@ -488,14 +503,14 @@ impl Ui {
     }
 
     fn tweens_mut(&mut self) -> Vec<&mut Tween> {
-        let mut v: Vec<&mut Tween> = vec![&mut self.w, &mut self.h, &mut self.y, &mut self.rt, &mut self.rb, &mut self.tuck, &mut self.tuck_a, &mut self.shift, &mut self.bubble_k, &mut self.pad, &mut self.content, &mut self.lyr_scroll, &mut self.lyr_k, &mut self.open_k, &mut self.press_pill, &mut self.track_k];
+        let mut v: Vec<&mut Tween> = vec![&mut self.w, &mut self.h, &mut self.y, &mut self.rt, &mut self.rb, &mut self.tuck, &mut self.tuck_a, &mut self.shift, &mut self.bubble_k, &mut self.pad, &mut self.content, &mut self.lyr_scroll, &mut self.lyr_k, &mut self.open_k, &mut self.vol_k, &mut self.press_pill, &mut self.track_k];
         v.extend(self.btn_hover.iter_mut());
         v.extend(self.btn_press.iter_mut());
         v
     }
 
     fn tweens(&self) -> Vec<&Tween> {
-        let mut v: Vec<&Tween> = vec![&self.w, &self.h, &self.y, &self.rt, &self.rb, &self.tuck, &self.tuck_a, &self.shift, &self.bubble_k, &self.pad, &self.content, &self.lyr_scroll, &self.lyr_k, &self.open_k, &self.press_pill, &self.track_k];
+        let mut v: Vec<&Tween> = vec![&self.w, &self.h, &self.y, &self.rt, &self.rb, &self.tuck, &self.tuck_a, &self.shift, &self.bubble_k, &self.pad, &self.content, &self.lyr_scroll, &self.lyr_k, &self.open_k, &self.vol_k, &self.press_pill, &self.track_k];
         v.extend(self.btn_hover.iter());
         v.extend(self.btn_press.iter());
         v
@@ -773,6 +788,32 @@ impl Ui {
         std::mem::take(&mut self.sounds)
     }
 
+    /// Is the volume slider part of the open player?
+    fn has_vol(&self) -> bool {
+        self.cfg.player_volume && !self.lyrics_on
+    }
+
+    /// The volume Windows reports (ignored while the slider is being dragged).
+    pub fn set_volume(&mut self, v: f32) {
+        if self.vol_drag.is_none() {
+            self.vol = v.clamp(0.0, 1.0);
+        }
+    }
+
+    /// A volume the user dragged to, to be given to Windows (once).
+    pub fn take_volume_request(&mut self) -> Option<f32> {
+        self.vol_req.take()
+    }
+
+    pub fn wants_volume(&self) -> bool {
+        self.cfg.player_volume && self.mode() == Mode::Open && self.media.active
+    }
+
+    /// Ask for a sound (the window plays it).
+    pub fn play_sound(&mut self, s: Sound) {
+        self.sound(s);
+    }
+
     fn sound(&mut self, s: Sound) {
         if self.sounds.len() < 4 {
             self.sounds.push(s);
@@ -967,6 +1008,11 @@ impl Ui {
     }
 
     fn open_height(&self) -> f32 {
+        let v = if self.has_vol() { 38.0 } else { 0.0 };
+        v + self.open_height_base()
+    }
+
+    fn open_height_base(&self) -> f32 {
         if self.lyrics_on {
             200.0
         } else if self.compact() {
@@ -1177,10 +1223,8 @@ impl Ui {
                 self.open = false;
             }
         }
-        if self.open != self.open_prev {
-            self.open_prev = self.open;
-            self.sound(if self.open { Sound::Open } else { Sound::Close });
-        }
+        // (no sound for hovering: opening and closing the island is silent)
+        self.open_prev = self.open;
         self.update_lyric_line();
         self.retarget();
         let now = self.t;
@@ -1194,6 +1238,8 @@ impl Ui {
             self.btn_hover[i].go(if hov_btn == Some(i) { 1.0 } else { 0.0 }, now, 0.15, 0.0, EASE);
             self.btn_press[i].go(if down_btn == Some(i) { 1.0 } else { 0.0 }, now, 0.12, 0.0, EASE);
         }
+        let on_vol = self.vol_drag.is_some() || matches!(hov, Some(Hit::Volume(_)));
+        self.vol_k.go(if on_vol { 1.0 } else { 0.0 }, now, 0.18, 0.0, Curve(0.22, 1.0, 0.36, 1.0));
         self.track_k.go(if on_track { 1.0 } else { 0.0 }, now, 0.18, 0.0, Curve(0.22, 1.0, 0.36, 1.0));
         for s in self.tweens_mut() {
             s.step(now);
@@ -1239,6 +1285,7 @@ impl Ui {
             play: (ow / 2.0, yc),
             next: (ow / 2.0 + 88.0, yc),
             lyr_btn: (ow - 38.0, yc),
+            vol: if self.has_vol() { Some((26.0 + 30.0, yc + 48.0, ow - 52.0 - 60.0)) } else { None },
         }
     }
 
@@ -1318,8 +1365,17 @@ impl Ui {
                     return Hit::Seek(clamp01((rx - tx) / tw));
                 }
             }
+            if let Some((vx, vy, vw)) = l.vol {
+                if (ry - vy).abs() <= 12.0 && rx >= vx - 22.0 && rx <= vx + vw + 8.0 {
+                    return Hit::Volume(clamp01((rx - vx) / vw));
+                }
+            }
         }
         Hit::Pill
+    }
+
+    pub fn is_playing(&self) -> bool {
+        self.media.playing
     }
 
     pub fn has_bubble(&self) -> bool {
@@ -1366,6 +1422,11 @@ impl Ui {
         self.down = Some(h.clone());
         match &h {
             Hit::Seek(f) => self.drag_frac = Some(*f),
+            Hit::Volume(f) => {
+                self.vol_drag = Some(*f);
+                self.vol = *f;
+                self.vol_req = Some(*f);
+            }
             Hit::Pill | Hit::Card(_) | Hit::Bubble | Hit::OpenSource => self.press_pill.go(1.0, self.t, 0.12, 0.0, EASE),
             _ => {}
         }
@@ -1373,6 +1434,16 @@ impl Ui {
     }
 
     pub fn mouse_move(&mut self, px: f32) {
+        if self.vol_drag.is_some() {
+            let l = self.open_layout();
+            if let Some((vx, _, vw)) = l.vol {
+                let r = self.pill_rect();
+                let f = clamp01((px / self.scale - r.0 - vx) / vw);
+                self.vol_drag = Some(f);
+                self.vol = f;
+                self.vol_req = Some(f);
+            }
+        }
         if self.drag_frac.is_some() {
             self.drag_frac = Some(self.frac_at(px));
         }
@@ -1386,6 +1457,10 @@ impl Ui {
     pub fn mouse_up(&mut self, px: f32, py: f32) -> Hit {
         self.press_pill.go(0.0, self.t, 0.35, 0.0, SPRING);
         let down = self.down.take();
+        if let Some(f) = self.vol_drag.take() {
+            self.vol_req = Some(f);
+            return Hit::Volume(f);
+        }
         if let Some(f) = self.drag_frac.take() {
             return Hit::Seek(f);
         }
@@ -1398,7 +1473,7 @@ impl Ui {
 
     /// Should the mouse cursor be a hand here?
     pub fn wants_hand(&self, px: f32, py: f32) -> bool {
-        matches!(self.hit(px, py), Hit::Prev | Hit::PlayPause | Hit::Next | Hit::LyricsToggle | Hit::Seek(_) | Hit::Card(_) | Hit::Bubble | Hit::OpenSource | Hit::LyricLine(_) | Hit::HomeRow(_) | Hit::HomeClear)
+        matches!(self.hit(px, py), Hit::Prev | Hit::PlayPause | Hit::Next | Hit::LyricsToggle | Hit::Seek(_) | Hit::Card(_) | Hit::Bubble | Hit::OpenSource | Hit::LyricLine(_) | Hit::Volume(_) | Hit::HomeRow(_) | Hit::HomeClear)
     }
 
     /// Mouse wheel over the lyrics: scroll by hand (the lyrics stop following the song for a few seconds).
@@ -1877,6 +1952,25 @@ impl Ui {
             gfx::stroke_icon(&mut self.pm, &ic.lyrics_lines, lx, ly, 22.0 * sc * s, 1.7, WHITE, ac * 0.9);
         }
 
+        // the volume of the music: a speaker, and a slider like the progress bar
+        if let Some((vx, vy, vw)) = lay.vol {
+            let av = a_player * reach(vy + 10.0);
+            let by = y0 + vy + dy;
+            let th = lerp(6.0, 10.0, self.vol_k.x);
+            let vol = self.vol;
+            gfx::fill_rrect(&mut self.pm, (x0 + vx) * s, (by - th / 2.0) * s, vw * s, th * s, [th / 2.0 * s; 4], [44, 44, 46], av);
+            gfx::fill_rrect(&mut self.pm, (x0 + vx) * s, (by - th / 2.0) * s, (vw * vol).max(th) * s, th * s, [th / 2.0 * s; 4], WHITE, av);
+            let (sx, sy) = ((x0 + vx - 16.0) * s, by * s);
+            gfx::fill_icon(&mut self.pm, &ic.speaker, sx, sy, 17.0 * s, false, [142, 142, 147], av);
+            if vol > 0.02 {
+                gfx::stroke_icon(&mut self.pm, &ic.waves, sx, sy, 17.0 * s, 1.7, [142, 142, 147], av * if vol > 0.5 { 1.0 } else { 0.55 });
+            }
+            let pct = format!("{}%", (vol * 100.0).round() as i32);
+            let pw = self.fonts.measure(Weight::Regular, &pct, 11.5 * s);
+            self.fonts.draw(&mut self.pm, Weight::Regular, &pct, (x0 + vx + vw + 8.0) * s - 0.0, (by + 4.0) * s, 11.5 * s, GRAY, av * 0.0 + av);
+            let _ = pw;
+        }
+
         // lyrics view: the way back, and the lines
         if k_in > 0.01 {
             // the way back: the filled lyrics bubble (as in the Electron version)
@@ -1970,6 +2064,8 @@ struct OpenLayout {
     next: (f32, f32),
     /// the lyrics button, at the right end of the controls row
     lyr_btn: (f32, f32),
+    /// the volume slider: x, y (centre line), width
+    vol: Option<(f32, f32, f32)>,
 }
 
 pub fn fmt_time(secs: f64) -> String {

@@ -30,11 +30,11 @@ fn bloop(f0: f32, f1: f32, glide: f32, len: f32, tau: f32, amp: f32) -> Vec<f32>
 /// A soft bell-like note (a marimba / glass tap): a few partials, the higher ones dying faster.
 fn bell(freq: f32, len: f32, amp: f32) -> Vec<f32> {
     let n = (len * SR as f32) as usize;
-    let partials = [(1.0f32, 1.0f32, 0.20f32), (2.0, 0.32, 0.09), (3.01, 0.12, 0.045), (4.2, 0.05, 0.03)];
+    let partials = [(1.0f32, 1.0f32, 0.16f32), (2.0, 0.14, 0.06), (3.01, 0.04, 0.03)];
     (0..n)
         .map(|i| {
             let t = i as f32 / SR as f32;
-            let attack = 1.0 - (-t / 0.002).exp();
+            let attack = 1.0 - (-t / 0.006).exp(); // a soft start: no click
             let mut s = 0.0;
             for (m, a, tau) in partials {
                 s += (TAU * freq * m * t).sin() * a * (-t / tau).exp();
@@ -91,16 +91,22 @@ fn main() {
     let dir = "assets/sounds";
     std::fs::create_dir_all(dir).unwrap();
     // the island grows: a rising bloop
-    write_wav(&format!("{dir}/open.wav"), &finish(bloop(420.0, 840.0, 0.15, 0.24, 0.075, 1.0), 0.55));
+    write_wav(&format!("{dir}/open.wav"), &finish(bloop(330.0, 620.0, 0.15, 0.24, 0.075, 1.0), 0.16));
     // the island shrinks: a falling, softer bloop
-    write_wav(&format!("{dir}/close.wav"), &finish(bloop(760.0, 390.0, 0.13, 0.2, 0.055, 1.0), 0.42));
+    write_wav(&format!("{dir}/close.wav"), &finish(bloop(560.0, 300.0, 0.13, 0.2, 0.055, 1.0), 0.12));
     // a notification: two soft notes going up (B5, E6)
     let mut n = Vec::new();
-    mix_at(&mut n, &bell(987.77, 0.5, 1.0), 0.0);
-    mix_at(&mut n, &bell(1318.51, 0.55, 0.9), 0.09);
-    write_wav(&format!("{dir}/notify.wav"), &finish(n, 0.6));
+    mix_at(&mut n, &bell(659.25, 0.45, 1.0), 0.0);
+    mix_at(&mut n, &bell(880.0, 0.5, 0.9), 0.1);
+    write_wav(&format!("{dir}/notify.wav"), &finish(n, 0.2));
+    // pause: a small soft tick going down; play: the same going up; skip: two quick light ticks
+    write_wav(&format!("{dir}/pause.wav"), &finish(bloop(480.0, 320.0, 0.06, 0.14, 0.032, 1.0), 0.13));
+    write_wav(&format!("{dir}/play.wav"), &finish(bloop(320.0, 500.0, 0.06, 0.14, 0.034, 1.0), 0.14));
+    let mut k = bell(784.0, 0.12, 1.0);
+    mix_at(&mut k, &bell(1046.5, 0.14, 0.85), 0.045);
+    write_wav(&format!("{dir}/skip.wav"), &finish(k, 0.11));
     // a status pill (Wi-Fi, battery ...): one short, bright blip (D6) with a low "pop" under it
-    let mut s = bell(1174.66, 0.3, 1.0);
-    mix_at(&mut s, &bloop(300.0, 180.0, 0.05, 0.08, 0.025, 0.5), 0.0);
-    write_wav(&format!("{dir}/status.wav"), &finish(s, 0.5));
+    let mut s = bell(880.0, 0.3, 1.0);
+    mix_at(&mut s, &bloop(240.0, 160.0, 0.05, 0.08, 0.025, 0.4), 0.0);
+    write_wav(&format!("{dir}/status.wav"), &finish(s, 0.15));
 }

@@ -131,7 +131,7 @@ fn build(n: &windows::UI::Notifications::UserNotification, logos: &mut HashMap<S
     let info = n.AppInfo()?;
     let display = info.DisplayInfo()?;
     let app = display.DisplayName().map(|s| s.to_string()).unwrap_or_default();
-    if app.eq_ignore_ascii_case("dynamic island") {
+    if app.eq_ignore_ascii_case("dynamic island") || app.eq_ignore_ascii_case("bloop") {
         return Ok(None);
     }
     let aumid = info.AppUserModelId().map(|s| s.to_string()).unwrap_or_default();

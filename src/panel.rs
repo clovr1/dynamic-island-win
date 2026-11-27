@@ -71,6 +71,7 @@ pub enum Id {
     DndQuiet,
     Sounds,
     Volume,
+    PlayerVolume,
     Theme(u8),
 }
 
@@ -228,7 +229,7 @@ fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
 
 impl Panel {
     /// The default (and smallest) size of the window's inside, logical pixels.
-    pub const DEFAULT_SIZE: (f32, f32) = (920.0, 660.0);
+    pub const DEFAULT_SIZE: (f32, f32) = (920.0, 700.0);
     pub const MIN_SIZE: (f32, f32) = (700.0, 460.0);
 
     pub fn new(scale: f32, s: Settings, autostart: bool, size_px: (u32, u32)) -> Panel {
@@ -409,12 +410,13 @@ impl Panel {
             0 => vec![
                 Row::Toggle(Id::Autostart, "Start with Windows", "Open the island automatically when you sign in (applied when you press Save)", self.autostart),
                 Row::Button(Id::Reset, "Reset all settings", "Put every setting back to how it was at the start (press Save to apply)".into(), "Reset".into(), 0),
-                Row::Button(Id::Quit, "Quit Dynamic Island", "Close the island completely".into(), "Quit".into(), 2),
+                Row::Button(Id::Quit, "Quit Bloop", "Close the island completely".into(), "Quit".into(), 2),
             ],
             1 => vec![
                 Row::Toggle(Id::Pill, "Small pill while music plays", "Show the cover and equalizer at the top while a song plays", s.show_music_pill),
                 Row::Toggle(Id::PlayerFront, "Hide it while the music app is in front", "No need for the pill when the player's own window is open", s.hide_when_player_front),
                 Row::Toggle(Id::Lyrics, "Lyrics button", "Show a lyrics button in the player (lyrics come from lrclib.net)", s.lyrics_button),
+                Row::Toggle(Id::PlayerVolume, "Volume slider in the player", "Change the volume of the music right from the open player", s.player_volume),
                 Row::Toggle(Id::Eq, "Equalizer in the cover's colour", "Otherwise the equalizer is white", s.accent_eq),
             ],
             2 => vec![
@@ -446,8 +448,8 @@ impl Panel {
                 };
                 vec![
                     Row::Toggle(Id::CheckUpd, "Check for updates automatically", "A few seconds after start and then every 6 hours", s.check_updates),
-                    Row::Button(Id::InstallFile, "Install from a file", "Pick a newer Dynamic Island.exe on this PC (to try a build before it is published)".into(), "Choose file...".into(), 0),
-                    Row::Button(Id::CheckNow, "Dynamic Island", format!("Version {} - {}", crate::version::VERSION, self.status), label, style),
+                    Row::Button(Id::InstallFile, "Install from a file", "Pick a newer Bloop.exe on this PC (to try a build before it is published)".into(), "Choose file...".into(), 0),
+                    Row::Button(Id::CheckNow, "Bloop", format!("Version {} - {}", crate::version::VERSION, self.status), label, style),
                 ]
             }
         }
@@ -535,7 +537,7 @@ impl Panel {
 
         // ---- the list of pages ----
         rr(&mut pm, s, 0.0, 0.0, SIDE, h, 0.0, WIN_BG, 1.0);
-        self.fonts.draw(&mut pm, Weight::Semibold, "Dynamic Island", 22.0 * s, 40.0 * s, 17.0 * s, TEXT, 1.0);
+        self.fonts.draw(&mut pm, Weight::Semibold, "Bloop", 22.0 * s, 40.0 * s, 17.0 * s, TEXT, 1.0);
         self.fonts.draw(&mut pm, Weight::Regular, &format!("Settings - version {}", crate::version::VERSION), 22.0 * s, 60.0 * s, 12.0 * s, DIM, 1.0);
         for (i, name) in PAGES.iter().enumerate() {
             let id = Id::Nav(i as u8);
@@ -558,14 +560,14 @@ impl Panel {
             if hov {
                 rr(&mut pm, s, x, y, bw, bh, 5.0, NAV_HOVER, 1.0);
             }
-            self.text_mid(&mut pm, Weight::Regular, "Quit Dynamic Island", x + 18.0, y + bh / 2.0, 14.0, if pal.light { [200, 40, 40] } else { [255, 138, 128] });
+            self.text_mid(&mut pm, Weight::Regular, "Quit Bloop", x + 18.0, y + bh / 2.0, 14.0, if pal.light { [200, 40, 40] } else { [255, 138, 128] });
             self.hot.push(Hot { id: Id::Quit, x, y, w: bw, h: bh });
         }
 
         // ---- the settings of the page ----
         let cx = SIDE + 36.0;
         let cw = (w - SIDE - 72.0).clamp(300.0, 760.0);
-        const ROWS_TOP: f32 = 296.0;
+        const ROWS_TOP: f32 = 322.0;
         let mut y = ROWS_TOP - self.scroll;
         let rows = self.rows();
         for row in &rows {
@@ -579,8 +581,8 @@ impl Panel {
 
         // everything above the rows stays where it is: the live island, the title and the little buttons
         rr(&mut pm, s, SIDE, 0.0, w - SIDE, ROWS_TOP - 8.0, 0.0, PAGE_BG, 1.0);
-        self.draw_stage(&mut pm, cx, 16.0, cw, 224.0);
-        self.fonts.draw(&mut pm, Weight::Semibold, PAGES[self.page as usize], cx * s, 276.0 * s, 24.0 * s, TEXT, 1.0);
+        self.draw_stage(&mut pm, cx, 16.0, cw, 246.0);
+        self.fonts.draw(&mut pm, Weight::Semibold, PAGES[self.page as usize], cx * s, 302.0 * s, 24.0 * s, TEXT, 1.0);
         // the buttons that make the preview show things
         let mut bx = cx + cw;
         for (id, label, on) in [(Id::DemoFs, "Full-screen", self.demo_fs), (Id::DemoMax, "Maximized", self.demo_max), (Id::DemoStatus, "Status pill", false), (Id::DemoNotif, "Notification", false)] {
@@ -591,9 +593,9 @@ impl Panel {
             let down = hov && self.down == Some(id);
             let base = if on { ACCENT } else { BTN };
             let col = if down { mix(base, [0, 0, 0], 0.22) } else if hov { mix(base, [255, 255, 255], 0.12) } else { base };
-            rr(&mut pm, s, bx, 250.0, bw, 28.0, 14.0, col, 1.0);
-            self.text_mid(&mut pm, Weight::Semibold, label, bx + 13.0, 264.0, 12.5, if on { ON_ACCENT } else { TEXT });
-            self.hot.push(Hot { id, x: bx, y: 250.0, w: bw, h: 28.0 });
+            rr(&mut pm, s, bx, 276.0, bw, 28.0, 14.0, col, 1.0);
+            self.text_mid(&mut pm, Weight::Semibold, label, bx + 13.0, 290.0, 12.5, if on { ON_ACCENT } else { TEXT });
+            self.hot.push(Hot { id, x: bx, y: 276.0, w: bw, h: 28.0 });
             bx -= 8.0;
         }
         // unsaved changes: a bar at the bottom with Discard / Save
@@ -943,7 +945,12 @@ impl Panel {
             self.preview_down = false;
             let (px, py) = (x - self.canvas_at.0, y - self.canvas_at.1);
             match self.preview.mouse_up(px, py) {
-                Hit::PlayPause => self.preview.toggle_playing_locally(),
+                Hit::PlayPause => {
+                    self.preview.toggle_playing_locally();
+                    let s = if self.preview.is_playing() { crate::ui::Sound::Play } else { crate::ui::Sound::Pause };
+                    self.preview.play_sound(s);
+                }
+                Hit::Prev | Hit::Next => self.preview.play_sound(crate::ui::Sound::Skip),
                 Hit::Card(_) => {
                     if !self.preview.card_click() {
                         self.preview.dismiss_card();
@@ -979,6 +986,7 @@ impl Panel {
             Id::CheckUpd => s.check_updates = !s.check_updates,
             Id::StatusPills => s.status_pills = !s.status_pills,
             Id::Sounds => s.sounds = !s.sounds,
+            Id::PlayerVolume => s.player_volume = !s.player_volume,
             Id::DndQuiet => s.dnd_quiet = !s.dnd_quiet,
             Id::Theme(n) => {
                 if s.theme == n {

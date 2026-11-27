@@ -311,6 +311,8 @@ pub struct Icons {
     pub fwd: Path,
     pub lyrics_bubble: Path,
     pub lyrics_lines: Path,
+    pub speaker: Path,
+    pub waves: Path,
 }
 
 pub fn icons() -> &'static Icons {
@@ -323,6 +325,8 @@ pub fn icons() -> &'static Icons {
             fwd: p("M2 6.2v11.6a1 1 0 0 0 1.55.83l8-5.8a1 1 0 0 0 0-1.66l-8-5.8A1 1 0 0 0 2 6.2zM12.2 6.2v11.6a1 1 0 0 0 1.55.83l8-5.8a1 1 0 0 0 0-1.66l-8-5.8a1 1 0 0 0-1.55.83z"),
             lyrics_bubble: p("M5.5 4.5h13a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H12l-4.5 3.5V16.5h-2a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z"),
             lyrics_lines: p("M8 9.3h8M8 12.5h5"),
+            speaker: p("M3 9.2v5.6h3.8l5.2 4.2V5L6.8 9.2z"),
+            waves: p("M15.6 8.6a4.6 4.6 0 0 1 0 6.8M18.3 5.8a8.4 8.4 0 0 1 0 12.4"),
         }
     })
 }

@@ -127,7 +127,7 @@ pub fn stage_file(path: &std::path::Path) -> Result<(), String> {
     // it must be this app: its single-instance name is inside (as UTF-16 text)
     let needle: Vec<u8> = "DynamicIslandNative".encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
     if !data.windows(needle.len()).any(|w| w == needle.as_slice()) {
-        return Err("that file is not a Dynamic Island program".into());
+        return Err("that file is not a Bloop program".into());
     }
     let exe = exe_path().ok_or("cannot find the program")?;
     std::fs::write(with_suffix(&exe, ".new"), &data).map_err(|e| format!("could not save the update next to the program: {e}"))

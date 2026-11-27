@@ -10,6 +10,9 @@ static OPEN: &[u8] = include_bytes!("../assets/sounds/open.wav");
 static CLOSE: &[u8] = include_bytes!("../assets/sounds/close.wav");
 static NOTIFY: &[u8] = include_bytes!("../assets/sounds/notify.wav");
 static STATUS: &[u8] = include_bytes!("../assets/sounds/status.wav");
+static PAUSE: &[u8] = include_bytes!("../assets/sounds/pause.wav");
+static PLAY: &[u8] = include_bytes!("../assets/sounds/play.wav");
+static SKIP: &[u8] = include_bytes!("../assets/sounds/skip.wav");
 
 /// The buffers Windows may still be playing from (it reads them while it plays): the last few are kept.
 static KEEP: Mutex<Vec<Vec<u8>>> = Mutex::new(Vec::new());
@@ -24,10 +27,13 @@ pub fn play(s: Sound, volume: u32) {
         Sound::Close => CLOSE,
         Sound::Notify => NOTIFY,
         Sound::Status => STATUS,
+        Sound::Pause => PAUSE,
+        Sound::Play => PLAY,
+        Sound::Skip => SKIP,
     };
     let mut buf = src.to_vec();
-    // 100 % = a bit louder than the file itself; the samples start after the 44-byte header
-    let gain = volume as f32 / 100.0 * 1.6;
+    // the files are already quiet; 100 % is about twice the file (the samples start after the 44-byte header)
+    let gain = volume as f32 / 100.0 * 2.0;
     for c in buf[44..].chunks_exact_mut(2) {
         let v = i16::from_le_bytes([c[0], c[1]]) as f32 * gain;
         c.copy_from_slice(&(v.clamp(-32767.0, 32767.0) as i16).to_le_bytes());
