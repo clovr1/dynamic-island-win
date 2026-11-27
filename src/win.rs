@@ -8,9 +8,10 @@ use crate::settings::Settings;
 use crate::settings_win::{self, Action};
 use crate::update::{self, Outcome, WM_UPDATE};
 use crate::ui::{Hit, Need, Ui};
+use windows::Win32::UI::Shell::{Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW};
 use std::cell::RefCell;
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use windows::core::{w, PCWSTR};
@@ -73,6 +74,10 @@ const TIMER_ENV: usize = 2;
 const TIMER_PEEK: usize = 3;
 /// the next look for a new version
 const TIMER_UPD: usize = 4;
+/// a mouse event on the tray icon (WM_APP + 6)
+const WM_TRAY: u32 = 0x8006;
+/// Explorer was restarted: the tray icon must be added again
+static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const RUN_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
 /// the "app" of the update card: a click on it installs instead of opening an app
@@ -430,6 +435,12 @@ impl App {
     /// A background update check finished.
     fn on_update(&mut self) {
         let Some((manual, out)) = update::take_result() else { return };
+        let card = manual && settings_win::handle().is_none();
+        match &out {
+            Outcome::UpToDate if card => self.say("You have the newest version"),
+            Outcome::Failed(m) if card => self.say(m),
+            _ => {}
+        }
         match out {
             Outcome::UpToDate => {
                 log("update: up to date");
@@ -461,6 +472,12 @@ impl App {
                 }
             }
         }
+    }
+
+    fn say(&mut self, text: &str) {
+        self.ui.push_notification(crate::ui::NotifData { app: "Dynamic Island".into(), aumid: String::new(), title: "Updates".into(), body: text.into(), icon: None });
+        self.present();
+        self.kick();
     }
 
     /// Time to look for a new version (every few hours, if the user allows it).
@@ -564,10 +581,93 @@ fn set_autostart(on: bool) {
     }
 }
 
+/// The tray icon: a small island (black pill, white outline, cover dot and equalizer bars), drawn here at the size the tray wants.
+fn make_tray_icon() -> Option<HICON> {
+    use tiny_skia::Pixmap;
+    unsafe {
+        let n = (GetSystemMetrics(SM_CXSMICON).max(16)) as u32;
+        let f = n as f32 / 32.0;
+        let mut pm = Pixmap::new(n, n)?;
+        let (x, y, w, h) = (1.0 * f, 5.0 * f, 30.0 * f, 22.0 * f);
+        crate::gfx::fill_rrect(&mut pm, x, y, w, h, [h / 2.0; 4], [255, 255, 255], 1.0);
+        let b = 2.6 * f;
+        crate::gfx::fill_rrect(&mut pm, x + b, y + b, w - 2.0 * b, h - 2.0 * b, [(h - 2.0 * b) / 2.0; 4], [0, 0, 0], 1.0);
+        let d = 8.0 * f;
+        crate::gfx::fill_rrect(&mut pm, 6.6 * f, 16.0 * f - d / 2.0, d, d, [d / 2.0; 4], [255, 255, 255], 1.0);
+        for (i, bh) in [7.0f32, 11.0, 6.0].iter().enumerate() {
+            let (bw, bh) = (2.6 * f, bh * f);
+            crate::gfx::fill_rrect(&mut pm, (15.8 + i as f32 * 4.0) * f, 16.0 * f - bh / 2.0, bw, bh, [bw / 2.0; 4], [255, 255, 255], 1.0);
+        }
+        // premultiplied RGBA -> straight BGRA, the way a Windows icon wants it
+        let mut bgra = Vec::with_capacity((n * n * 4) as usize);
+        for p in pm.data().chunks_exact(4) {
+            let a = p[3] as f32;
+            let un = |c: u8| if a > 0.0 { ((c as f32) * 255.0 / a).round().min(255.0) as u8 } else { 0 };
+            bgra.extend_from_slice(&[un(p[2]), un(p[1]), un(p[0]), p[3]]);
+        }
+        let bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: n as i32, biHeight: -(n as i32), biPlanes: 1, biBitCount: 32, biCompression: BI_RGB.0, ..Default::default() },
+            ..Default::default()
+        };
+        let screen = GetDC(None);
+        let mut bits: *mut c_void = std::ptr::null_mut();
+        let color = CreateDIBSection(screen, &bmi, DIB_RGB_COLORS, &mut bits, None, 0);
+        ReleaseDC(None, screen);
+        let color = color.ok()?;
+        std::ptr::copy_nonoverlapping(bgra.as_ptr(), bits as *mut u8, bgra.len());
+        let mask = CreateBitmap(n as i32, n as i32, 1, 1, None);
+        let info = ICONINFO { fIcon: BOOL(1), xHotspot: 0, yHotspot: 0, hbmMask: mask, hbmColor: color };
+        let icon = CreateIconIndirect(&info).ok();
+        let _ = DeleteObject(color);
+        let _ = DeleteObject(mask);
+        icon
+    }
+}
+
+fn tray_data(hwnd: HWND) -> NOTIFYICONDATAW {
+    let mut nid = NOTIFYICONDATAW { cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32, hWnd: hwnd, uID: 1, ..Default::default() };
+    nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    nid.uCallbackMessage = WM_TRAY;
+    for (i, c) in "Dynamic Island".encode_utf16().enumerate() {
+        nid.szTip[i] = c;
+    }
+    nid
+}
+
+fn add_tray_icon(hwnd: HWND) {
+    unsafe {
+        let mut nid = tray_data(hwnd);
+        if let Some(icon) = make_tray_icon() {
+            nid.hIcon = icon;
+        }
+        let _ = Shell_NotifyIconW(NIM_ADD, &nid);
+        if !nid.hIcon.is_invalid() {
+            let _ = DestroyIcon(nid.hIcon);
+        }
+    }
+}
+
+fn remove_tray_icon(hwnd: HWND) {
+    unsafe {
+        let nid = tray_data(hwnd);
+        let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
+    }
+}
+
 fn open_settings() {
     if let Some(s) = with_app(|a| a.settings.clone()) {
         settings_win::set_base(&s);
         settings_win::open(&s, autostart_enabled());
+    }
+}
+
+/// "Check for updates" from the menu: the answer comes as a card when no settings window is open.
+fn check_updates_now() {
+    let Some((h, repo, ready)) = with_app(|a| (a.hwnd.0 as isize, a.settings.update_repo.clone(), a.update_ready.is_some())) else { return };
+    if ready {
+        install_update();
+    } else if !update::busy() {
+        update::spawn_check(h, repo, true);
     }
 }
 
@@ -622,6 +722,8 @@ fn show_menu(hwnd: HWND) {
         let on = autostart_enabled();
         let _ = AppendMenuW(menu, MF_STRING | if on { MF_CHECKED } else { MF_UNCHECKED }, 1, w!("Start with Windows"));
         let _ = AppendMenuW(menu, MF_STRING, 4, w!("Settings..."));
+        let _ = AppendMenuW(menu, MF_STRING, 6, w!("Check for updates"));
+        let _ = SetMenuDefaultItem(menu, 4, 0);
         let ready = with_app(|a| a.update_ready.clone()).flatten();
         if let Some(v) = &ready {
             let t: Vec<u16> = format!("Restart to update to {v}").encode_utf16().chain(std::iter::once(0)).collect();
@@ -638,6 +740,7 @@ fn show_menu(hwnd: HWND) {
         match cmd.0 {
             1 => set_autostart(!on),
             4 => open_settings(),
+            6 => check_updates_now(),
             5 => install_update(),
             3 => {
                 with_app(|a| a.test_notification());
@@ -725,6 +828,18 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
                 with_app(|a| a.on_update_timer());
                 return LRESULT(0);
             }
+            WM_TRAY => {
+                match (lp.0 & 0xFFFF) as u32 {
+                    WM_LBUTTONUP => open_settings(),
+                    WM_RBUTTONUP => show_menu(hwnd),
+                    _ => {}
+                }
+                return LRESULT(0);
+            }
+            m if m != 0 && m == TASKBAR_CREATED.load(Ordering::Relaxed) => {
+                add_tray_icon(hwnd);
+                return LRESULT(0);
+            }
             WM_UPDATE => {
                 with_app(|a| a.on_update());
                 return LRESULT(0);
@@ -754,6 +869,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
                 return LRESULT(0);
             }
             WM_DESTROY => {
+                remove_tray_icon(hwnd);
                 PostQuitMessage(0);
                 return LRESULT(0);
             }
@@ -861,6 +977,8 @@ pub fn run() {
         SetTimer(hwnd, TIMER_ENV, 1000, None);
         SetTimer(hwnd, TIMER_UPD, 25_000, None); // the first look for a new version, shortly after start
         settings_win::set_sink(Box::new(on_settings_action));
+        TASKBAR_CREATED.store(RegisterWindowMessageW(w!("TaskbarCreated")), Ordering::Relaxed);
+        add_tray_icon(hwnd);
         MAIN_HWND.store(hwnd.0 as isize, Ordering::Relaxed);
         let _ = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, None, Some(on_foreground), 0, 0, WINEVENT_OUTOFCONTEXT);
 
