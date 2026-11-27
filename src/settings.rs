@@ -40,7 +40,7 @@ pub struct Settings {
     pub sounds: bool,
     /// 0..=100
     pub volume: u32,
-    /// which set of sounds: 0 Bloop, 1 Glass, 2 Wood, 3 Air
+    /// which set of sounds: 0 Bloop, 1 Glass, 2 Wood, 3 Air, 4 Tap
     pub sound_pack: u8,
     /// a volume slider for the music in the open player
     pub player_volume: bool,
@@ -135,7 +135,7 @@ impl Settings {
         self.speed_pct = self.speed_pct.clamp(50, 200);
         self.theme = self.theme.min(5);
         self.volume = self.volume.min(100);
-        self.sound_pack = self.sound_pack.min(3);
+        self.sound_pack = self.sound_pack.min(4);
         // an "owner/repo" is letters, digits, - _ . and one slash; anything else is dropped
         let ok = self.update_repo.split('/').count() == 2 && self.update_repo.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c));
         if !ok {

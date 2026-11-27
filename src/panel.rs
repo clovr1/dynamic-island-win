@@ -800,7 +800,7 @@ impl Panel {
                 card(self, pm, None);
                 self.text_mid(pm, Weight::Regular, "Sound style", cx + 18.0, y + 20.0, 14.5, TEXT);
                 self.fonts.draw(pm, Weight::Regular, "Click one to hear it", (cx + 18.0) * s, (y + 42.0) * s, 12.5 * s, DIM, 1.0);
-                const PACKS: [(&str, &str); 4] = [("Bloop", "soft bubbles"), ("Glass", "tiny taps"), ("Wood", "plucked notes"), ("Air", "gentle whooshes")];
+                const PACKS: [(&str, &str); 5] = [("Bloop", "soft bubbles"), ("Glass", "tiny chimes"), ("Wood", "plucked notes"), ("Air", "gentle whooshes"), ("Tap", "small taps")];
                 let n = PACKS.len() as f32;
                 let gap = 10.0;
                 let bw = (cw - 36.0 - gap * (n - 1.0)) / n;
@@ -1021,7 +1021,7 @@ impl Panel {
                 if s.sound_pack == n {
                     return None;
                 }
-                s.sound_pack = n.min(3);
+                s.sound_pack = n.min(4);
                 self.s = s.clone();
                 self.sync_preview();
                 // play a sample in the new style

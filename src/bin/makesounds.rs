@@ -145,6 +145,43 @@ fn pluck(freq: f32, len: f32, amp: f32) -> Vec<f32> {
         .collect()
 }
 
+/// A small tap, like a fingertip on glass or a haptic "tick": a very short, dry thud (a quickly falling low sine) with a tiny click on top.
+fn tap(freq: f32, len: f32, amp: f32) -> Vec<f32> {
+    let n = (len * SR as f32) as usize;
+    let mut seed = 0x9e37_79b9u32;
+    let mut lp = 0.0f32;
+    let mut phase = 0.0f32;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / SR as f32;
+            // the pitch falls fast: it is a "tok", not a note
+            let f = freq * (0.55 + 0.45 * (-t / 0.012).exp());
+            phase += TAU * f / SR as f32;
+            let body = phase.sin() * (-t / 0.014).exp();
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            let n1 = (seed as f32 / u32::MAX as f32) * 2.0 - 1.0;
+            lp += (n1 - lp) * 0.35;
+            let click = lp * (-t / 0.0025).exp() * 0.35;
+            (body + click) * (1.0 - (-t / 0.0008).exp()) * amp
+        })
+        .collect()
+}
+
+/// Tap: only small taps, different in pitch and number.
+fn pack_tap(dir: &str) {
+    let mut n = tap(240.0, 0.06, 1.0);
+    mix_at(&mut n, &tap(300.0, 0.06, 0.8), 0.085);
+    write_wav(&format!("{dir}/notify.wav"), &finish(n, 0.22));
+    write_wav(&format!("{dir}/status.wav"), &finish(tap(280.0, 0.06, 1.0), 0.2));
+    write_wav(&format!("{dir}/pause.wav"), &finish(tap(190.0, 0.055, 1.0), 0.2));
+    write_wav(&format!("{dir}/play.wav"), &finish(tap(260.0, 0.055, 1.0), 0.2));
+    let mut k = tap(330.0, 0.04, 0.9);
+    mix_at(&mut k, &tap(380.0, 0.04, 0.7), 0.05);
+    write_wav(&format!("{dir}/skip.wav"), &finish(k, 0.17));
+}
+
 fn pack_bloop(dir: &str) {
     write_wav(&format!("{dir}/notify.wav"), &finish({ let mut n = Vec::new(); mix_at(&mut n, &bell(659.25, 0.45, 1.0), 0.0); mix_at(&mut n, &bell(880.0, 0.5, 0.9), 0.1); n }, 0.2));
     write_wav(&format!("{dir}/status.wav"), &finish({ let mut s = bell(880.0, 0.3, 1.0); mix_at(&mut s, &bloop(240.0, 160.0, 0.05, 0.08, 0.025, 0.4), 0.0); s }, 0.15));
@@ -194,7 +231,7 @@ fn pack_air(dir: &str) {
 }
 
 fn main() {
-    for (name, f) in [("bloop", pack_bloop as fn(&str)), ("glass", pack_glass), ("wood", pack_wood), ("air", pack_air)] {
+    for (name, f) in [("bloop", pack_bloop as fn(&str)), ("glass", pack_glass), ("wood", pack_wood), ("air", pack_air), ("tap", pack_tap)] {
         let dir = format!("assets/sounds/{name}");
         std::fs::create_dir_all(&dir).unwrap();
         f(&dir);

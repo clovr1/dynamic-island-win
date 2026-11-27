@@ -18,8 +18,8 @@ macro_rules! pack {
     };
 }
 
-/// notify, status, pause, play, skip - for each set of sounds (Bloop, Glass, Wood, Air)
-static PACKS: [[&[u8]; 5]; 4] = [pack!("bloop"), pack!("glass"), pack!("wood"), pack!("air")];
+/// notify, status, pause, play, skip - for each set of sounds (Bloop, Glass, Wood, Air, Tap)
+static PACKS: [[&[u8]; 5]; 5] = [pack!("bloop"), pack!("glass"), pack!("wood"), pack!("air"), pack!("tap")];
 
 /// The buffers Windows may still be playing from (it reads them while it plays): the last few are kept.
 static KEEP: Mutex<Vec<Vec<u8>>> = Mutex::new(Vec::new());
