@@ -94,7 +94,8 @@ fn sounds_are_asked_for() {
     ui.push_status(StatusData::Sys { key: "wifi".into(), on: true });
     assert!(ui.take_sounds().contains(&Sound::Status));
     // opening and closing the home view (a fresh island: no card is in the way)
-    let mut ui = ui();
+    let mut ui = Ui::new(1.0);
+    ui.set_settings(&Settings::default());
     ui.set_cursor(Some((235.0, 28.0)));
     run(&mut ui, 1.5);
     ui.set_cursor(None);
