@@ -98,6 +98,10 @@ struct Card {
     left: f32,
     /// seconds on screen in total: a card never stays longer than 25 s, whatever the mouse does
     age: f32,
+    /// it grew out of the small bubble (the mouse went over it): it shrinks back into the bubble when the mouse leaves
+    from_bubble: bool,
+    /// seconds the mouse has been away from it
+    away: f32,
 }
 
 struct Bubble {
@@ -895,6 +899,7 @@ impl Ui {
         };
 
         // notification countdowns
+        let music = self.media.active && self.media.playing && !self.pf() && self.cfg.show_music_pill && self.cfg.use_bubble;
         if let Some(c) = &mut self.card {
             if over_pill {
                 c.left = c.left.max(1.4); // reading it: it stays
@@ -902,14 +907,19 @@ impl Ui {
                 c.left -= dt;
             }
             c.age += dt;
-            if c.left <= 0.0 || c.age > 25.0 {
+            c.away = if over_pill { 0.0 } else { c.away + dt };
+            if c.from_bubble && c.away > 0.8 && music && c.age < 25.0 {
+                // the mouse left: the card shrinks back into the small bubble beside the music pill
+                let c = self.card.take().unwrap();
+                self.bubble = Some(Bubble { n: c.n, left: 3.5, hover: 0.0 });
+            } else if c.left <= 0.0 || c.age > 25.0 {
                 self.card = None;
                 self.gap = 0.6;
             }
         } else if self.gap > 0.0 {
             self.gap -= dt;
         } else if let Some(n) = self.queue.pop_front() {
-            self.card = Some(Card { n, left: self.cfg.card_secs as f32, age: 0.0 });
+            self.card = Some(Card { n, left: self.cfg.card_secs as f32, age: 0.0, from_bubble: false, away: 0.0 });
         }
         if let Some(b) = &mut self.bubble {
             b.left -= dt;
@@ -919,7 +929,7 @@ impl Ui {
             } else if b.hover > 0.15 {
                 // hover the small bubble: it grows into the card
                 let b = self.bubble.take().unwrap();
-                self.card = Some(Card { n: b.n, left: self.cfg.card_secs as f32 + 2.0, age: 0.0 });
+                self.card = Some(Card { n: b.n, left: self.cfg.card_secs as f32 + 2.0, age: 0.0, from_bubble: true, away: 0.0 });
             }
         }
 
@@ -1061,6 +1071,10 @@ impl Ui {
             }
         }
         Hit::Pill
+    }
+
+    pub fn has_bubble(&self) -> bool {
+        self.bubble.is_some()
     }
 
     pub fn bubble_aumid(&self) -> String {
