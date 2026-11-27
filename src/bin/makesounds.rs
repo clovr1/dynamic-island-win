@@ -44,6 +44,32 @@ fn bell(freq: f32, len: f32, amp: f32) -> Vec<f32> {
         .collect()
 }
 
+/// A very soft note: the tone and a faint octave, an attack of about 12 ms and a long, gentle fade.
+fn soft(freq: f32, len: f32, amp: f32) -> Vec<f32> {
+    let n = (len * SR as f32) as usize;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / SR as f32;
+            let attack = 1.0 - (-t / 0.012).exp();
+            let s = (TAU * freq * t).sin() + 0.12 * (TAU * freq * 2.0 * t).sin() * (-t / 0.05).exp();
+            s * attack * (-t / 0.12).exp() * amp
+        })
+        .collect()
+}
+
+/// Two one-pole low-pass filters in a row: takes the edge off everything above `cutoff` (Hz).
+fn lowpass(x: &[f32], cutoff: f32) -> Vec<f32> {
+    let a = 1.0 - (-TAU * cutoff / SR as f32).exp();
+    let (mut y1, mut y2) = (0.0f32, 0.0f32);
+    x.iter()
+        .map(|v| {
+            y1 += (v - y1) * a;
+            y2 += (y1 - y2) * a;
+            y2
+        })
+        .collect()
+}
+
 fn mix_at(dst: &mut Vec<f32>, src: &[f32], at: f32) {
     let off = (at * SR as f32) as usize;
     if dst.len() < off + src.len() {
@@ -215,12 +241,13 @@ fn main() {
     let dir = "assets/sounds";
     std::fs::create_dir_all(dir).unwrap();
     pack_ios(dir);
-    // notification: "Milestone"-like (original): a short, bright, rising little tune, getting quieter towards the top
+    // notification: "Milestone"-like (original), but SOFT: lower notes, a slow round attack, almost no overtones, and a low-pass
+    // filter over everything, so nothing is sharp
     let mut n = Vec::new();
-    for (i, (f, a)) in [(1046.5f32, 1.0f32), (1318.5, 0.85), (1568.0, 0.7), (2093.0, 0.5)].iter().enumerate() {
-        mix_at(&mut n, &bell(*f, 0.32, *a), i as f32 * 0.075);
+    for (i, (f, a)) in [(523.25f32, 1.0f32), (659.25, 0.9), (783.99, 0.8), (1046.5, 0.6)].iter().enumerate() {
+        mix_at(&mut n, &soft(*f, 0.5, *a), i as f32 * 0.09);
     }
-    write_wav(&format!("{dir}/notify.wav"), &finish(n, 0.2));
+    write_wav(&format!("{dir}/notify.wav"), &finish(lowpass(&n, 1500.0), 0.13));
 
     // status pills: each has its own sound, in two families. Connections (Wi-Fi, Bluetooth, hotspot, cellular) are two bright notes
     // (rising = on, falling = off); modes (airplane, Do Not Disturb, night light, energy saver) are warmer and lower.
