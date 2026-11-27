@@ -732,6 +732,30 @@ fn install_update() {
     }
 }
 
+/// "Open file" dialog for a program file.
+fn pick_exe() -> Option<std::path::PathBuf> {
+    use windows::Win32::UI::Controls::Dialogs::{GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST, OPENFILENAMEW};
+    unsafe {
+        let mut buf = [0u16; 1040];
+        let filter: Vec<u16> = "Dynamic Island program (*.exe)\0*.exe\0\0".encode_utf16().collect();
+        let mut ofn = OPENFILENAMEW {
+            lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
+            hwndOwner: settings_win::handle().unwrap_or_default(),
+            lpstrFilter: PCWSTR(filter.as_ptr()),
+            lpstrFile: windows::core::PWSTR(buf.as_mut_ptr()),
+            nMaxFile: buf.len() as u32,
+            Flags: OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR,
+            ..Default::default()
+        };
+        if GetOpenFileNameW(&mut ofn).as_bool() {
+            let n = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+            Some(std::path::PathBuf::from(String::from_utf16_lossy(&buf[..n])))
+        } else {
+            None
+        }
+    }
+}
+
 /// What the settings window asks for.
 fn on_settings_action(a: Action) {
     match a {
@@ -759,6 +783,17 @@ fn on_settings_action(a: Action) {
             }
         }
         Action::Install => install_update(),
+        Action::InstallFile => {
+            if let Some(path) = pick_exe() {
+                match update::stage_file(&path) {
+                    Ok(()) => install_update(),
+                    Err(e) => {
+                        log(&format!("update: file install failed: {e}"));
+                        settings_win::set_update_status(&format!("Could not use that file: {e}"), false);
+                    }
+                }
+            }
+        }
         Action::Test => {
             with_app(|a| a.test_notification());
         }

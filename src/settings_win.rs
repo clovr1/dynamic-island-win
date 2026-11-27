@@ -57,6 +57,7 @@ pub enum Action {
     Install,
     Test,
     Quit,
+    InstallFile,
 }
 
 /// Where the window reports its changes to (set once by the main window).
@@ -249,6 +250,7 @@ fn handle_act(act: Act) {
         Act::Reset => emit(Action::Reset),
         Act::Test => emit(Action::Test),
         Act::Quit => emit(Action::Quit),
+        Act::InstallFile => emit(Action::InstallFile),
     }
 }
 

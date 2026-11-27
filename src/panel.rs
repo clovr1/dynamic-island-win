@@ -59,6 +59,7 @@ pub enum Id {
     CheckNow,
     Reset,
     Quit,
+    InstallFile,
     /// the little buttons under the preview
     DemoNotif,
     DemoMax,
@@ -78,6 +79,7 @@ pub enum Act {
     Reset,
     Test,
     Quit,
+    InstallFile,
 }
 
 enum Row {
@@ -350,6 +352,7 @@ impl Panel {
                 };
                 vec![
                     Row::Toggle(Id::CheckUpd, "Check for updates automatically", "A few seconds after start and then every 6 hours", s.check_updates),
+                    Row::Button(Id::InstallFile, "Install from a file", "Pick a newer Dynamic Island.exe on this PC (to try a build before it is published)".into(), "Choose file...".into(), 0),
                     Row::Button(Id::CheckNow, "Dynamic Island", format!("Version {} - {}", crate::version::VERSION, self.status), label, style),
                 ]
             }
@@ -825,6 +828,7 @@ impl Panel {
             Id::CheckNow => return Some(if self.ready { Act::Install } else { Act::CheckNow }),
             Id::Reset => return Some(Act::Reset),
             Id::Quit => return Some(Act::Quit),
+            Id::InstallFile => return Some(Act::InstallFile),
             _ => return None,
         }
         self.s = s.clone();
