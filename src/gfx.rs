@@ -1,7 +1,7 @@
 //! Drawing: rounded shapes, icons, album art and text. Everything is drawn on a premultiplied RGBA pixmap.
 
 use std::collections::HashMap;
-use tiny_skia::{FillRule, FilterQuality, LineCap, LineJoin, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Stroke, Transform};
+use tiny_skia::{FillRule, FilterQuality, LineCap, LineJoin, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke, Transform};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Weight {
@@ -40,10 +40,23 @@ impl Fonts {
         if let Some(&i) = self.index.get(&key) {
             return i;
         }
-        let g = match w {
-            Weight::Regular => self.regular.rasterize(c, px),
-            Weight::Semibold => self.semibold.rasterize(c, px),
-            Weight::Bold => self.bold.rasterize(c, px),
+        let font = match w {
+            Weight::Regular => &self.regular,
+            Weight::Semibold => &self.semibold,
+            Weight::Bold => &self.bold,
+        };
+        let g = if font.lookup_glyph_index(c) == 0 && !c.is_whitespace() {
+            // Inter has no music notes (and no CJK / emoji): draw the notes ourselves, leave other missing characters blank instead of a box
+            match note_glyph(c, px) {
+                Some(g) => g,
+                None => {
+                    let (mut m, _) = font.rasterize(' ', px);
+                    m.advance_width = px * 0.5;
+                    (m, Vec::new())
+                }
+            }
+        } else {
+            font.rasterize(c, px)
         };
         self.store.push(g);
         self.index.insert(key, self.store.len() - 1);
@@ -358,4 +371,74 @@ pub fn fill_gradient_circle(pm: &mut Pixmap, x: f32, y: f32, size: f32, a: [u8; 
     if let Some(path) = rrect(x, y, size, size, [size / 2.0; 4]) {
         pm.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);
     }
+}
+
+/// A music note (U+266A) or two beamed notes (U+266B) as a glyph of the given size, drawn as a vector shape.
+fn note_glyph(c: char, px: f32) -> Option<(fontdue::Metrics, Vec<u8>)> {
+    if c != '\u{266A}' && c != '\u{266B}' {
+        return None;
+    }
+    let double = c == '\u{266B}';
+    let (w, h) = ((px * if double { 0.95 } else { 0.62 }).ceil().max(2.0), (px * 0.95).ceil().max(2.0));
+    let mut pm = Pixmap::new(w as u32, h as u32)?;
+    let mut paint = Paint::default();
+    paint.set_color_rgba8(255, 255, 255, 255);
+    paint.anti_alias = true;
+    let head = |pm: &mut Pixmap, paint: &Paint, cx: f32, cy: f32| {
+        // a slightly tilted oval
+        let (rx, ry) = (px * 0.19, px * 0.135);
+        let mut pb = PathBuilder::new();
+        pb.push_oval(Rect::from_xywh(-rx, -ry, rx * 2.0, ry * 2.0).unwrap());
+        if let Some(p) = pb.finish() {
+            let t = Transform::from_rotate(-22.0).post_translate(cx, cy);
+            pm.fill_path(&p, paint, FillRule::Winding, t, None);
+        }
+    };
+    let stem = (px * 0.075).max(1.2);
+    let rect = |pm: &mut Pixmap, paint: &Paint, x: f32, y: f32, w: f32, h: f32| {
+        if let Some(r) = Rect::from_xywh(x, y, w, h) {
+            pm.fill_rect(r, paint, Transform::identity(), None);
+        }
+    };
+    let top = px * 0.04;
+    let hy = h - px * 0.17;
+    if double {
+        let (x1, x2) = (px * 0.2, px * 0.72);
+        head(&mut pm, &paint, x1, hy);
+        head(&mut pm, &paint, x2, hy - px * 0.08);
+        rect(&mut pm, &paint, x1 + px * 0.13, top + px * 0.08, stem, hy - top - px * 0.08);
+        rect(&mut pm, &paint, x2 + px * 0.13, top, stem, hy - px * 0.08 - top);
+        // the beam joining the two stems
+        let mut pb = PathBuilder::new();
+        pb.move_to(x1 + px * 0.13, top + px * 0.08);
+        pb.line_to(x2 + px * 0.13 + stem, top);
+        pb.line_to(x2 + px * 0.13 + stem, top + px * 0.15);
+        pb.line_to(x1 + px * 0.13, top + px * 0.23);
+        pb.close();
+        if let Some(p) = pb.finish() {
+            pm.fill_path(&p, &paint, FillRule::Winding, Transform::identity(), None);
+        }
+    } else {
+        let x = px * 0.2;
+        head(&mut pm, &paint, x, hy);
+        let sx = x + px * 0.13;
+        rect(&mut pm, &paint, sx, top, stem, hy - top);
+        // the flag
+        let mut pb = PathBuilder::new();
+        pb.move_to(sx, top);
+        pb.cubic_to(sx + px * 0.05, top + px * 0.2, sx + px * 0.3, top + px * 0.22, sx + px * 0.28, top + px * 0.5);
+        pb.cubic_to(sx + px * 0.2, top + px * 0.33, sx + px * 0.12, top + px * 0.3, sx, top + px * 0.3);
+        pb.close();
+        if let Some(p) = pb.finish() {
+            pm.fill_path(&p, &paint, FillRule::Winding, Transform::identity(), None);
+        }
+    }
+    let cov: Vec<u8> = pm.data().chunks_exact(4).map(|p| p[3]).collect();
+    let mut m = fontdue::Metrics::default();
+    m.width = w as usize;
+    m.height = h as usize;
+    m.xmin = (px * 0.04) as i32;
+    m.ymin = (-px * 0.02) as i32;
+    m.advance_width = w + px * 0.12;
+    Some((m, cov))
 }
