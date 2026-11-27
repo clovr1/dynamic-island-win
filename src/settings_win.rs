@@ -48,11 +48,9 @@ pub fn handle() -> Option<HWND> {
 }
 
 pub enum Action {
-    /// the settings changed: apply and save them
-    Changed(Settings),
+    /// "Save": apply the settings to the running island, keep them, set Start with Windows
+    Save(Settings, bool),
     CheckNow(Settings),
-    Reset,
-    Autostart(bool),
     /// swap the downloaded update in and restart
     Install,
     Test,
@@ -87,14 +85,6 @@ pub fn set_update_status(text: &str, ready: bool) {
 pub fn set_busy(text: &str) {
     with_win(|w| {
         w.panel.set_busy(text);
-        w.draw();
-    });
-}
-
-/// Put new values into the open window (after "Reset to defaults").
-pub fn refresh(s: &Settings, autostart: bool) {
-    with_win(|w| {
-        w.panel.set_settings(s.clone(), autostart);
         w.draw();
     });
 }
@@ -238,8 +228,12 @@ pub fn open(current: &Settings, autostart: bool, icon: Option<HICON>) {
 /// What the panel asked for.
 fn handle_act(act: Act) {
     match act {
-        Act::Changed(s) => emit(Action::Changed(s)),
-        Act::Autostart(on) => emit(Action::Autostart(on)),
+        // (editing only changes the draft in the window; the running island follows when "Save" is pressed)
+        Act::Changed(_) => {}
+        Act::Save(s, auto) => {
+            emit(Action::Save(s, auto));
+            with_win(|w| w.panel.mark_saved());
+        }
         Act::CheckNow => {
             let s = with_win(|w| w.panel.s.clone());
             if let Some(s) = s {
@@ -247,7 +241,6 @@ fn handle_act(act: Act) {
             }
         }
         Act::Install => emit(Action::Install),
-        Act::Reset => emit(Action::Reset),
         Act::Test => emit(Action::Test),
         Act::Quit => emit(Action::Quit),
         Act::InstallFile => emit(Action::InstallFile),
@@ -369,6 +362,19 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 return LRESULT(0);
             }
             WM_CLOSE => {
+                let dirty = with_win(|w| w.panel.dirty()).unwrap_or(false);
+                if dirty {
+                    let r = MessageBoxW(hwnd, w!("Save your changes to the island?"), w!("Dynamic Island - Settings"), MB_YESNOCANCEL | MB_ICONQUESTION);
+                    if r == IDCANCEL {
+                        return LRESULT(0);
+                    }
+                    if r == IDYES {
+                        let save = with_win(|w| (w.panel.s.clone(), w.panel.autostart_draft()));
+                        if let Some((s, a)) = save {
+                            emit(Action::Save(s, a));
+                        }
+                    }
+                }
                 let _ = DestroyWindow(hwnd);
                 return LRESULT(0);
             }

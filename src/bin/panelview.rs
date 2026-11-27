@@ -28,6 +28,12 @@ fn main() {
         run(&mut p, 1.0);
         p.render().save_png(format!("{out}/theme_{t}.png")).unwrap();
     }
+    // an unsaved change: the bar at the bottom
+    let mut p = Panel::new(1.0, Settings::default(), true, size);
+    p.set_page(1);
+    let _ = p.press(Id::Pill);
+    run(&mut p, 1.0);
+    p.render().save_png(format!("{out}/unsaved.png")).unwrap();
     // the island hovered (the player opens), then a notification, then a maximized window
     let mut p = Panel::new(1.0, Settings::default(), true, size);
     p.set_page(1);

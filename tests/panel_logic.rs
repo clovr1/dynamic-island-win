@@ -70,3 +70,32 @@ fn the_preview_follows_the_settings() {
     let after = p.render().data().to_vec();
     assert_ne!(before, after, "the live island looks different");
 }
+
+#[test]
+fn changes_wait_for_save() {
+    let mut p = panel();
+    assert!(!p.dirty());
+    p.set_page(1);
+    let s = changed(p.press(Id::Pill)).expect("edited");
+    assert!(!s.show_music_pill);
+    assert!(p.dirty(), "an unsaved change");
+    // Save hands the draft out and clears the mark once the window says it is applied
+    p.render();
+    match p.press(Id::Save) {
+        Some(Act::Save(s, _)) => assert!(!s.show_music_pill),
+        _ => panic!("Save should give the settings out"),
+    }
+    p.mark_saved();
+    assert!(!p.dirty());
+    // Discard goes back to what was saved
+    let _ = p.press(Id::Pill);
+    assert!(p.dirty());
+    p.render();
+    let _ = p.press(Id::Discard);
+    assert!(!p.dirty());
+    assert!(!p.s.show_music_pill);
+    // the start-with-Windows switch is a draft too
+    p.set_page(0);
+    let _ = p.press(Id::Autostart);
+    assert!(p.dirty());
+}

@@ -611,19 +611,74 @@ fn open_app(aumid: &str) {
     }
 }
 
+const APPROVED_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run");
+
+/// The command Windows should run at sign-in: this very program, quoted.
+fn autostart_command() -> Option<String> {
+    std::env::current_exe().ok().map(|e| format!("\"{}\"", e.display()))
+}
+
+/// What the Run entry says now (None: no entry).
+fn autostart_value() -> Option<String> {
+    unsafe {
+        let mut n = 0u32;
+        if RegGetValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_NAME, RRF_RT_REG_SZ, None, None, Some(&mut n)) != ERROR_SUCCESS || n < 2 {
+            return None;
+        }
+        let mut buf = vec![0u16; (n as usize + 1) / 2 + 1];
+        let mut n2 = (buf.len() * 2) as u32;
+        if RegGetValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_NAME, RRF_RT_REG_SZ, None, Some(buf.as_mut_ptr() as *mut c_void), Some(&mut n2)) != ERROR_SUCCESS {
+            return None;
+        }
+        let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        Some(String::from_utf16_lossy(&buf[..end]))
+    }
+}
+
+/// Windows' own Startup apps list (Settings > Apps > Startup, Task Manager > Startup) can switch an entry off without removing it.
+fn autostart_blocked() -> bool {
+    unsafe {
+        let mut data = [0u8; 12];
+        let mut n = 12u32;
+        if RegGetValueW(HKEY_CURRENT_USER, APPROVED_KEY, RUN_NAME, RRF_RT_REG_BINARY, None, Some(data.as_mut_ptr() as *mut c_void), Some(&mut n)) != ERROR_SUCCESS {
+            return false;
+        }
+        data[0] & 1 == 1 // 02 / 06 = enabled, 03 / 07 = switched off by the user
+    }
+}
+
+/// Will the island really start with Windows? (entry present, pointing at THIS program, not switched off in Windows' Startup list)
 fn autostart_enabled() -> bool {
-    unsafe { RegGetValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_NAME, RRF_RT_REG_SZ, None, None, None) == ERROR_SUCCESS }
+    match (autostart_value(), autostart_command()) {
+        (Some(v), Some(c)) => v.eq_ignore_ascii_case(&c) && !autostart_blocked(),
+        _ => false,
+    }
 }
 
 fn set_autostart(on: bool) {
     unsafe {
         if on {
-            if let Ok(exe) = std::env::current_exe() {
-                let v: Vec<u16> = format!("\"{}\"", exe.display()).encode_utf16().chain(std::iter::once(0)).collect();
-                let _ = RegSetKeyValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_NAME, REG_SZ.0, Some(v.as_ptr() as *const c_void), (v.len() * 2) as u32);
+            if let Some(cmd) = autostart_command() {
+                let v: Vec<u16> = cmd.encode_utf16().chain(std::iter::once(0)).collect();
+                let r = RegSetKeyValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_NAME, REG_SZ.0, Some(v.as_ptr() as *const c_void), (v.len() * 2) as u32);
+                // and make sure Windows' Startup list has it switched ON (it may have been switched off there before)
+                let enabled: [u8; 12] = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+                let r2 = RegSetKeyValueW(HKEY_CURRENT_USER, APPROVED_KEY, RUN_NAME, REG_BINARY.0, Some(enabled.as_ptr() as *const c_void), 12);
+                log(&format!("autostart: on -> {cmd} (run entry {:?}, approved {:?})", r, r2));
             }
         } else {
             let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_NAME);
+            log("autostart: off");
+        }
+    }
+}
+
+/// At start: an entry that points to an old place (the program was moved or renamed) is repaired, so "Start with Windows" keeps working.
+fn repair_autostart() {
+    if let (Some(v), Some(c)) = (autostart_value(), autostart_command()) {
+        if !v.eq_ignore_ascii_case(&c) {
+            log(&format!("autostart: entry pointed to {v}, now {c}"));
+            set_autostart(true);
         }
     }
 }
@@ -759,15 +814,13 @@ fn pick_exe() -> Option<std::path::PathBuf> {
 /// What the settings window asks for.
 fn on_settings_action(a: Action) {
     match a {
-        Action::Changed(s) => {
+        Action::Save(s, autostart) => {
+            // the running island follows the saved settings right away (no restart)
             with_app(|app| app.apply_settings(s));
+            if autostart != autostart_enabled() {
+                set_autostart(autostart);
+            }
         }
-        Action::Reset => {
-            let d = Settings { update_repo: with_app(|a| a.settings.update_repo.clone()).unwrap_or_default(), ..Settings::default() };
-            with_app(|app| app.apply_settings(d.clone()));
-            settings_win::refresh(&d, autostart_enabled());
-        }
-        Action::Autostart(on) => set_autostart(on),
         Action::CheckNow(s) => {
             let hwnd = with_app(|app| {
                 app.apply_settings(s.clone());
@@ -953,6 +1006,7 @@ pub fn run() {
             std::thread::sleep(std::time::Duration::from_millis(100));
         };
         update::cleanup();
+        repair_autostart();
         let _ = RoInitialize(RO_INIT_SINGLETHREADED);
 
         let hinst = GetModuleHandleW(None).unwrap_or_default();

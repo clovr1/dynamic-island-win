@@ -60,6 +60,8 @@ pub enum Id {
     Reset,
     Quit,
     InstallFile,
+    Save,
+    Discard,
     /// the little buttons under the preview
     DemoNotif,
     DemoMax,
@@ -72,11 +74,12 @@ pub enum Id {
 
 /// What the panel asks its window to do.
 pub enum Act {
+    /// the draft was edited (nothing is applied yet)
     Changed(Settings),
-    Autostart(bool),
+    /// "Save": apply to the running island: settings, start with Windows
+    Save(Settings, bool),
     CheckNow,
     Install,
-    Reset,
     Test,
     Quit,
     InstallFile,
@@ -122,8 +125,11 @@ pub struct Panel {
     w: f32,
     h: f32,
     pm: Pixmap,
+    /// the draft: what the window shows (and the preview); the running island has `saved`
     pub s: Settings,
     autostart: bool,
+    saved: Settings,
+    saved_autostart: bool,
     status: String,
     ready: bool,
     busy: bool,
@@ -191,6 +197,8 @@ impl Panel {
             w: 1.0,
             h: 1.0,
             pm: Pixmap::new(1, 1).unwrap(),
+            saved: s.clone(),
+            saved_autostart: autostart,
             s,
             autostart,
             status: String::new(),
@@ -280,8 +288,31 @@ impl Panel {
     }
 
     pub fn set_settings(&mut self, s: Settings, autostart: bool) {
+        self.saved = s.clone();
+        self.saved_autostart = autostart;
         self.s = s;
         self.autostart = autostart;
+        self.sync_preview();
+    }
+
+    /// Unsaved changes?
+    pub fn dirty(&self) -> bool {
+        self.s != self.saved || self.autostart != self.saved_autostart
+    }
+
+    pub fn autostart_draft(&self) -> bool {
+        self.autostart
+    }
+
+    /// The draft was applied: it is now what the running island has.
+    pub fn mark_saved(&mut self) {
+        self.saved = self.s.clone();
+        self.saved_autostart = self.autostart;
+    }
+
+    fn discard(&mut self) {
+        self.s = self.saved.clone();
+        self.autostart = self.saved_autostart;
         self.sync_preview();
     }
 
@@ -315,8 +346,8 @@ impl Panel {
         let s = &self.s;
         match self.page {
             0 => vec![
-                Row::Toggle(Id::Autostart, "Start with Windows", "Open the island automatically when you sign in", self.autostart),
-                Row::Button(Id::Reset, "Reset all settings", "Put every setting back to how it was at the start".into(), "Reset".into(), 0),
+                Row::Toggle(Id::Autostart, "Start with Windows", "Open the island automatically when you sign in (applied when you press Save)", self.autostart),
+                Row::Button(Id::Reset, "Reset all settings", "Put every setting back to how it was at the start (press Save to apply)".into(), "Reset".into(), 0),
                 Row::Button(Id::Quit, "Quit Dynamic Island", "Close the island completely".into(), "Quit".into(), 2),
             ],
             1 => vec![
@@ -454,7 +485,7 @@ impl Panel {
             self.draw_row(&mut pm, row, cx, y, cw, rh);
             y += rh + 6.0;
         }
-        let total = y + self.scroll + 20.0;
+        let total = y + self.scroll + 90.0;
         self.max_scroll = (total - h).max(0.0);
         self.scroll = self.scroll.min(self.max_scroll);
 
@@ -476,6 +507,29 @@ impl Panel {
             self.text_mid(&mut pm, Weight::Semibold, label, bx + 13.0, 264.0, 12.5, if on { ON_ACCENT } else { TEXT });
             self.hot.push(Hot { id, x: bx, y: 250.0, w: bw, h: 28.0 });
             bx -= 8.0;
+        }
+        // unsaved changes: a bar at the bottom with Discard / Save
+        if self.dirty() {
+            let bh = 64.0;
+            rr(&mut pm, s, SIDE, h - bh, w - SIDE, bh, 0.0, CARD, 1.0);
+            rr(&mut pm, s, SIDE, h - bh, w - SIDE, 1.0, 0.0, EDGE, 1.0);
+            rr(&mut pm, s, cx, h - bh / 2.0 - 4.0, 8.0, 8.0, 4.0, ACCENT, 1.0);
+            let msg = self.fonts.fit(Weight::Regular, "Unsaved changes - not applied until you save", 13.0 * s, (cw - 290.0).max(80.0) * s);
+            self.text_mid(&mut pm, Weight::Regular, &msg, cx + 18.0, h - bh / 2.0, 13.0, TEXT);
+            let mut bx = cx + cw;
+            for (id, label, primary) in [(Id::Save, "Save", true), (Id::Discard, "Discard", false)] {
+                let bw = if primary { 96.0 } else { 90.0 };
+                bx -= bw;
+                let hov = self.hover == Some(id);
+                let down = hov && self.down == Some(id);
+                let base = if primary { ACCENT } else { BTN };
+                let col = if down { mix(base, [0, 0, 0], 0.22) } else if hov { mix(base, [255, 255, 255], 0.12) } else { base };
+                rr(&mut pm, s, bx, h - bh / 2.0 - 16.0, bw, 32.0, 5.0, col, 1.0);
+                let tw = self.fonts.measure(Weight::Semibold, label, 13.5 * s) / s;
+                self.text_mid(&mut pm, Weight::Semibold, label, bx + bw / 2.0 - tw / 2.0, h - bh / 2.0, 13.5, if primary { ON_ACCENT } else { TEXT });
+                self.hot.insert(0, Hot { id, x: bx, y: h - bh / 2.0 - 16.0, w: bw, h: 32.0 });
+                bx -= 10.0;
+            }
         }
         // a thin scroll bar
         if self.max_scroll > 0.0 {
@@ -782,7 +836,7 @@ impl Panel {
         match released? {
             Id::Autostart => {
                 self.autostart = !self.autostart;
-                return Some(Act::Autostart(self.autostart));
+                return Some(Act::Changed(self.s.clone()));
             }
             Id::Pill => s.show_music_pill = !s.show_music_pill,
             Id::PlayerFront => s.hide_when_player_front = !s.hide_when_player_front,
@@ -826,7 +880,17 @@ impl Panel {
             }
             Id::Test => return Some(Act::Test),
             Id::CheckNow => return Some(if self.ready { Act::Install } else { Act::CheckNow }),
-            Id::Reset => return Some(Act::Reset),
+            Id::Reset => {
+                // back to the defaults in the draft (applied when "Save" is pressed)
+                let keep = s.update_repo.clone();
+                s = Settings::default();
+                s.update_repo = keep;
+            }
+            Id::Save => return Some(Act::Save(self.s.clone(), self.autostart)),
+            Id::Discard => {
+                self.discard();
+                return Some(Act::Changed(self.s.clone()));
+            }
             Id::Quit => return Some(Act::Quit),
             Id::InstallFile => return Some(Act::InstallFile),
             _ => return None,
