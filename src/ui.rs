@@ -66,6 +66,8 @@ pub enum Sound {
     Open,
     Close,
     Notify,
+    /// a notification that became the small bubble (music is playing)
+    Bubble,
     /// a status pill: which one (see `status_sound_code`)
     Status(u8),
     /// the play / pause / skip buttons
@@ -971,7 +973,8 @@ impl Ui {
         } else {
             self.queue.push_back(n);
         }
-        self.sound(Sound::Notify);
+        let bubble = self.card.is_none() && self.bubble.as_ref().map(|b| b.n.status.is_none()).unwrap_or(false);
+        self.sound(if bubble { Sound::Bubble } else { Sound::Notify });
         self.retarget();
     }
 

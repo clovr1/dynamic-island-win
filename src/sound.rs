@@ -7,6 +7,7 @@ use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT};
 
 static NOTIFY: &[u8] = include_bytes!("../assets/sounds/notify.wav");
+static BUBBLE: &[u8] = include_bytes!("../assets/sounds/bubble.wav");
 static PAUSE: &[u8] = include_bytes!("../assets/sounds/pause.wav");
 static PLAY: &[u8] = include_bytes!("../assets/sounds/play.wav");
 static SKIP: &[u8] = include_bytes!("../assets/sounds/skip.wav");
@@ -33,6 +34,7 @@ pub fn play(s: Sound, volume: u32) {
     }
     let src = match s {
         Sound::Notify => NOTIFY,
+        Sound::Bubble => BUBBLE,
         Sound::Status(c) => STATUS[(c as usize).min(STATUS.len() - 1)],
         Sound::Pause => PAUSE,
         Sound::Play => PLAY,

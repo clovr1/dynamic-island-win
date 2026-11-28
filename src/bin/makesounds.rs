@@ -230,6 +230,40 @@ fn pack_ios(dir: &str) {
     write_wav(&format!("{dir}/skip.wav"), &finish(k, 0.17));
 }
 
+/// One note of the "Milestone" tone: measured from the recording the user picked - a bell-like note (the fundamental, an octave above it,
+/// and a short bright overtone at about 6.4 times the pitch that is gone in a few hundredths of a second), ringing for about a second.
+fn milestone_note(freq: f32, len: f32, amp: f32) -> Vec<f32> {
+    let n = (len * SR as f32) as usize;
+    let partials = [(1.0f32, 1.0f32, 0.50f32), (2.0, 0.22, 0.28), (3.0, 0.07, 0.14), (6.4, 0.16, 0.035)];
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / SR as f32;
+            let attack = 1.0 - (-t / 0.004).exp();
+            let mut s = 0.0;
+            for (m, a, tau) in partials {
+                s += (TAU * freq * m * t).sin() * a * (-t / tau).exp();
+            }
+            s * attack * amp
+        })
+        .collect()
+}
+
+/// The "Droplet" tone, measured from the recording: a very short, soft "plip" - a low note (about 215-260 Hz) that jumps up to its octave
+/// (about 517 Hz), which rings for a moment. About 0.18 s in all.
+fn droplet_tone(len: f32, amp: f32) -> Vec<f32> {
+    let n = (len * SR as f32) as usize;
+    let mut phase = 0.0f32;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / SR as f32;
+            let f = 215.0 + (517.0 - 215.0) * (1.0 - (-t / 0.022).exp());
+            phase += TAU * f / SR as f32;
+            let env = (1.0 - (-t / 0.003).exp()) * (-t / 0.055).exp();
+            (phase.sin() + 0.28 * (0.5 * phase).sin() * (-t / 0.03).exp()) * env * amp
+        })
+        .collect()
+}
+
 /// Two notes one after the other (rising for "on", falling for "off").
 fn pair(first: f32, second: f32, gap: f32, mk: fn(f32, f32, f32) -> Vec<f32>, peak: f32) -> Vec<i16> {
     let mut s = mk(first, 0.4, 1.0);
@@ -241,13 +275,15 @@ fn main() {
     let dir = "assets/sounds";
     std::fs::create_dir_all(dir).unwrap();
     pack_ios(dir);
-    // notification: "Milestone"-like (original), but SOFT: lower notes, a slow round attack, almost no overtones, and a low-pass
-    // filter over everything, so nothing is sharp
+    // notification = "Milestone" (an original imitation made from the pitches and timing measured in the recording the user picked):
+    // F4, C5, F5 one after the other (0, 0.14 s and 0.22 s), ringing; kept soft (the highest sparkle is filtered away)
     let mut n = Vec::new();
-    for (i, (f, a)) in [(523.25f32, 1.0f32), (659.25, 0.9), (783.99, 0.8), (1046.5, 0.6)].iter().enumerate() {
-        mix_at(&mut n, &soft(*f, 0.5, *a), i as f32 * 0.09);
+    for (f, at, a) in [(349.23f32, 0.0f32, 1.0f32), (523.25, 0.14, 0.9), (698.46, 0.22, 0.85)] {
+        mix_at(&mut n, &milestone_note(f, 1.3, a), at);
     }
-    write_wav(&format!("{dir}/notify.wav"), &finish(lowpass(&n, 1500.0), 0.13));
+    write_wav(&format!("{dir}/notify.wav"), &finish(lowpass(&n, 3000.0), 0.15));
+    // the small notification bubble (while music plays) = "Droplet"
+    write_wav(&format!("{dir}/bubble.wav"), &finish(droplet_tone(0.22, 1.0), 0.14));
 
     // status pills: each has its own sound, in two families. Connections (Wi-Fi, Bluetooth, hotspot, cellular) are two bright notes
     // (rising = on, falling = off); modes (airplane, Do Not Disturb, night light, energy saver) are warmer and lower.

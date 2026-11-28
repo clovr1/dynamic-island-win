@@ -90,7 +90,14 @@ fn sounds_are_asked_for() {
     let mut ui = ui();
     ui.push_notification(note("Messages", "Alex"));
     run(&mut ui, 0.5);
-    assert!(ui.take_sounds().contains(&Sound::Notify));
+    assert!(ui.take_sounds().contains(&Sound::Notify), "a card = the Milestone tone");
+    // while music plays the notification is a small bubble: the Droplet tone
+    let mut m = Ui::new(1.0);
+    m.set_settings(&Settings::default());
+    m.set_media(island::ui::MediaInfo { active: true, title: "A".into(), artist: "B".into(), playing: true, pos: 1.0, dur: 100.0 });
+    run(&mut m, 1.0);
+    m.push_notification(note("Messages", "Alex"));
+    assert!(m.take_sounds().contains(&Sound::Bubble));
     ui.push_status(StatusData::Sys { key: "wifi".into(), on: true });
     assert!(ui.take_sounds().iter().any(|s| matches!(s, Sound::Status(_))));
     // every pill has its own sound: wifi on / off, battery charging / unplugged / low are all different
