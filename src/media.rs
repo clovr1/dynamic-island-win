@@ -218,7 +218,7 @@ fn refresh(
     let changed = match last_pub {
         Some((old, at)) => {
             let expect = if old.playing { old.pos + at.elapsed().as_secs_f64() } else { old.pos };
-            !old.active || old.title != info.title || old.artist != info.artist || old.playing != info.playing || (old.dur - info.dur).abs() > 0.5 || (expect - info.pos).abs() > 1.5
+            !old.active || old.title != info.title || old.artist != info.artist || old.playing != info.playing || (old.dur - info.dur).abs() > 0.5 || (expect - info.pos).abs() > 0.25
         }
         None => true,
     };

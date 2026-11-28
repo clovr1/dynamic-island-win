@@ -668,9 +668,9 @@ impl Ui {
         let mut top = 0.0;
         self.lyr_blocks.clear();
         for l in &self.lyr_lines {
-            // a gap in the song (an empty line) is not a lyric: nothing is written there, only a little space
-            let rows = if l.text.is_empty() { Vec::new() } else { wrap(&mut self.fonts, l.text.as_str(), px * s, aw * s) };
-            let h = if rows.is_empty() { 14.0 } else { rows.len() as f32 * lh + 10.0 };
+            let text = if l.text.is_empty() { "♪" } else { l.text.as_str() };
+            let rows = wrap(&mut self.fonts, text, px * s, aw * s);
+            let h = rows.len() as f32 * lh + 10.0;
             self.lyr_blocks.push(LyrBlock { t: l.t, rows, top, h });
             top += h;
         }
@@ -700,7 +700,7 @@ impl Ui {
         if !self.lyr_synced {
             return;
         }
-        let idx = lyrics::index_at(&self.lyr_lines, self.position() as f32 + 0.15);
+        let idx = lyrics::index_at(&self.lyr_lines, self.position() as f32 + 0.15 + (self.cfg.lyrics_shift as f32 - 30.0) * 0.1);
         if idx == self.lyr_idx {
             return;
         }
@@ -719,7 +719,7 @@ impl Ui {
             self.lyr_scroll.go(target, self.t, 0.6, 0.0, Curve(0.3, 0.9, 0.3, 1.0));
         }
         // the pill shows this line, and is as wide as the line needs
-        let text = if idx >= 0 && !self.lyr_lines[idx as usize].text.is_empty() { self.lyr_lines[idx as usize].text.clone() } else { String::new() };
+        let text = if idx >= 0 && !self.lyr_lines[idx as usize].text.is_empty() { self.lyr_lines[idx as usize].text.clone() } else { "♪".to_string() };
         let tw = self.fonts.measure(Weight::Semibold, &text, 14.0 * self.scale) / self.scale;
         self.line_w = (tw + 108.0).clamp(220.0, 400.0);
         let tn = self.fonts.measure(Weight::Semibold, &text, 12.0 * self.scale) / self.scale;

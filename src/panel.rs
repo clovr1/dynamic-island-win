@@ -73,6 +73,7 @@ pub enum Id {
     DndQuiet,
     Sounds,
     Volume,
+    LyricsShift,
     PlayerVolume,
     Theme(u8),
     Logo,
@@ -533,6 +534,7 @@ impl Panel {
                 Row::Toggle(Id::Pill, "Small pill while music plays", "Show the cover and equalizer at the top while a song plays", s.show_music_pill),
                 Row::Toggle(Id::PlayerFront, "Hide it while the music app is in front", "No need for the pill when the player's own window is open", s.hide_when_player_front),
                 Row::Toggle(Id::Lyrics, "Lyrics button", "Show a lyrics button in the player (lyrics come from lrclib.net)", s.lyrics_button),
+                Row::Slider(Id::LyricsShift, "Lyrics timing", "If the words come too early or too late, move them (+ = later)", s.lyrics_shift as f32, 0.0, 60.0, format!("{:+.1} s", (s.lyrics_shift as f32 - 30.0) * 0.1)),
                 Row::Toggle(Id::PlayerVolume, "Volume slider in the player", "Change the volume of the music right from the open player", s.player_volume),
                 Row::Toggle(Id::Eq, "Equalizer in the cover's colour", "Otherwise the equalizer is white", s.accent_eq),
             ],
@@ -1474,7 +1476,7 @@ impl Panel {
                 self.down = None;
                 None
             }
-            Some(id @ (Id::CardSecs | Id::Scale | Id::Speed | Id::Volume)) => {
+            Some(id @ (Id::CardSecs | Id::Scale | Id::Speed | Id::Volume | Id::LyricsShift)) => {
                 self.drag = Some(id);
                 self.set_slider(id, x, y)
             }
@@ -1600,6 +1602,7 @@ impl Panel {
             Id::CardSecs => (2.0, 20.0),
             Id::Scale => (80.0, 140.0),
             Id::Volume => (0.0, 100.0),
+            Id::LyricsShift => (0.0, 60.0),
             _ => (50.0, 200.0),
         };
         let v = (lo + frac * (hi - lo)).round() as u32;
@@ -1607,6 +1610,7 @@ impl Panel {
             Id::CardSecs => &mut self.s.card_secs,
             Id::Scale => &mut self.s.scale_pct,
             Id::Volume => &mut self.s.volume,
+            Id::LyricsShift => &mut self.s.lyrics_shift,
             _ => &mut self.s.speed_pct,
         };
         if *slot == v {

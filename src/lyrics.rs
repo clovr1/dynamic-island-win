@@ -110,10 +110,24 @@ pub fn pick_best(list: &Value, duration: f64) -> Option<Found> {
         }
         field(c[0], key)
     };
-    if let Some(s) = rank("syncedLyrics") {
-        let lines = parse_lrc(&s);
-        if !lines.is_empty() {
-            return Some(Found { synced: true, lines });
+    // timed lyrics only count when they are for a recording of about this length: another version (a live one, a remix) has other timing
+    let off = |key: &str| -> f64 {
+        let mut best = f64::MAX;
+        for x in arr {
+            if field(x, key).is_some() {
+                let d = (x.get("duration").and_then(|v| v.as_f64()).unwrap_or(0.0) - duration).abs();
+                best = best.min(d);
+            }
+        }
+        best
+    };
+    let synced_ok = duration <= 0.0 || off("syncedLyrics") <= 4.0 || rank("plainLyrics").is_none();
+    if synced_ok {
+        if let Some(s) = rank("syncedLyrics") {
+            let lines = parse_lrc(&s);
+            if !lines.is_empty() {
+                return Some(Found { synced: true, lines });
+            }
         }
     }
     if let Some(p) = rank("plainLyrics") {
@@ -203,5 +217,21 @@ mod tests {
     #[test]
     fn encoding() {
         assert_eq!(url_encode("a b&é"), "a%20b%26%C3%A9");
+    }
+
+    #[test]
+    fn timed_lyrics_of_another_version_are_not_trusted() {
+        let list: Value = serde_json::json!([
+            {"duration": 260.0, "syncedLyrics": "[00:10.00]hello\n[00:20.00]world", "plainLyrics": "hello\nworld"},
+        ]);
+        // the song here is 200 s long: the timed lyrics are for a 260 s recording, so only the plain words are used
+        let f = pick_best(&list, 200.0).unwrap();
+        assert!(!f.synced);
+        // about the same length: timed lyrics
+        let f = pick_best(&list, 261.5).unwrap();
+        assert!(f.synced);
+        // timed lyrics are all there is: used anyway
+        let only: Value = serde_json::json!([{"duration": 260.0, "syncedLyrics": "[00:10.00]hello"}]);
+        assert!(pick_best(&only, 200.0).unwrap().synced);
     }
 }
