@@ -701,7 +701,7 @@ impl Ui {
         if !self.lyr_synced {
             return;
         }
-        let idx = lyrics::index_at(&self.lyr_lines, self.position() as f32 + 0.15 + (self.cfg.lyrics_shift as f32 - 30.0) * 0.1);
+        let idx = lyrics::index_at(&self.lyr_lines, self.position() as f32 + 0.15 + LYRICS_SHIFT);
         if idx == self.lyr_idx {
             return;
         }
@@ -2097,7 +2097,7 @@ impl Ui {
                     let gap = (t1 - t0).max(0.3);
                     let est = (letters * 0.105 + 0.5).max(0.8);
                     let sung = if gap <= est * 1.35 { gap * 0.93 } else { est.min(gap * 0.93) };
-                    let pos = self.position() as f32 + 0.15 + (self.cfg.lyrics_shift as f32 - 30.0) * 0.1;
+                    let pos = self.position() as f32 + 0.15 + LYRICS_SHIFT;
                     ((pos - t0) / sung).clamp(0.0, 1.0)
                 } else {
                     1.0
@@ -2178,6 +2178,9 @@ struct OpenLayout {
     /// the volume slider: x, y (centre line), width
     vol: Option<(f32, f32, f32)>,
 }
+
+/// The words come this many seconds before the song position the player reports (found by trying: it fits best).
+const LYRICS_SHIFT: f32 = -1.0;
 
 pub fn fmt_time(secs: f64) -> String {
     let s = secs.max(0.0) as u64;

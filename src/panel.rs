@@ -543,7 +543,6 @@ impl Panel {
                 Row::Toggle(Id::Pill, "Small pill while music plays", "Show the cover and equalizer at the top while a song plays", s.show_music_pill),
                 Row::Toggle(Id::PlayerFront, "Hide it while the music app is in front", "No need for the pill when the player's own window is open", s.hide_when_player_front),
                 Row::Toggle(Id::Lyrics, "Lyrics button", "Show a lyrics button in the player (lyrics come from lrclib.net)", s.lyrics_button),
-                Row::Slider(Id::LyricsShift, "Lyrics timing", "If the words come too early or too late, move them (+ = later)", s.lyrics_shift as f32, 0.0, 60.0, format!("{:+.1} s", (s.lyrics_shift as f32 - 30.0) * 0.1)),
                 Row::LyrAnims(s.lyrics_anim),
                 Row::Toggle(Id::PlayerVolume, "Volume slider in the player", "Change the volume of the music right from the open player", s.player_volume),
                 Row::Toggle(Id::Eq, "Equalizer in the cover's colour", "Otherwise the equalizer is white", s.accent_eq),
