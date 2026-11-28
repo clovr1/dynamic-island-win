@@ -1,1 +1,7 @@
+# build output
 target/
+
+# pictures the tools in src/bin write to the current folder
+/*.png
+/preview/*.png
+*.log

@@ -1,4 +1,4 @@
-//! The four ways the lyrics can move, in the middle of a line.
+//! The two ways the lyrics can move (Smooth, Karaoke), in the middle of a line.
 use island::lyrics::{parse_lrc, Found};
 use island::settings::Settings;
 use island::ui::{MediaInfo, Ui};

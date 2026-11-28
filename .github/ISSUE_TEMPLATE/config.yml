@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Website with a live demo
+    url: https://clovr1.github.io/dynamic-island-win/
+    about: Try Bloop in the browser and read the FAQ (notifications during Do Not Disturb, SmartScreen, privacy).

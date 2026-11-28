@@ -1,0 +1,16 @@
+name: Idea
+description: Suggest something Bloop could do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+      description: Describe what you would see or do. A sketch or a picture of something similar is welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why?
+      description: What are you doing when you wish it existed?

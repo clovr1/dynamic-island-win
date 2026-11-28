@@ -1,0 +1,44 @@
+name: Bug report
+description: Something does not work, looks wrong or moves wrong
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead? A short screen recording helps a lot for animations.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Bloop version
+      description: Settings → Updates shows it ("Version 0.23.2").
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Settings → System → About, for example "Windows 11 23H2".
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part?
+      options:
+        - Music pill / player
+        - Lyrics
+        - Notifications
+        - Status pills (Wi-Fi, Bluetooth, battery ...)
+        - Full screen / maximized windows
+        - Settings window
+        - Updates
+        - Something else
+  - type: textarea
+    id: log
+    attributes:
+      label: Log (optional)
+      description: The end of %TEMP%\bloop.log, if something did not work.
+      render: text
