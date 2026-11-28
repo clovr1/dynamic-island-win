@@ -441,6 +441,9 @@ impl App {
             return;
         }
         let size_changed = s.scale_pct != self.settings.scale_pct;
+        if s.sounds != self.settings.sounds {
+            crate::sound::set_enabled(s.sounds);
+        }
         self.settings = s.clone();
         save_settings(&s);
         self.ui.set_settings(&s);
@@ -1061,6 +1064,7 @@ pub fn run() {
 
         let dpi_scale = GetDpiForSystem() as f32 / 96.0;
         let settings = load_settings();
+        crate::sound::set_enabled(settings.sounds);
         let scale = dpi_scale * settings.scale_pct as f32 / 100.0;
         let mut ui = Ui::new(scale);
         ui.set_settings(&settings);
