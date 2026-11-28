@@ -78,6 +78,9 @@ pub enum Sound {
 
 /// Which sound a status pill makes: 0..16 = wifi, bluetooth, hotspot, cellular, airplane, dnd, nightlight, energy (off, on each);
 /// 16 = charging, 17 = unplugged, 18 = low battery.
+const FACE_BLINK_EVERY: f32 = 4.3;
+const FACE_GLANCE_EVERY: f32 = 2.9;
+
 pub fn status_sound_code(st: &StatusData) -> u8 {
     match st {
         StatusData::Sys { key, on } => {
@@ -91,6 +94,7 @@ pub fn status_sound_code(st: &StatusData) -> u8 {
                 2
             }
         }
+        StatusData::Copied { .. } => 15,
         StatusData::Battery { low: true, .. } => 18,
         StatusData::Battery { charging: true, .. } => 16,
         StatusData::Battery { .. } => 17,
@@ -106,6 +110,8 @@ pub enum StatusData {
     Battery { label: String, level: i32, charging: bool, low: bool },
     /// a Bluetooth device connected / disconnected
     Device { name: String, kind: crate::deviceicons::Kind, connected: bool },
+    /// something was copied: "Text", "Image" or "Files" (never the content)
+    Copied { kind: String },
 }
 
 #[derive(Clone)]
@@ -212,6 +218,8 @@ pub enum Mode {
 pub enum Need {
     /// nothing moves: stop the timer, draw nothing
     Rest,
+    /// only the resting pill's face is alive: 10 frames a second are enough to catch its next blink
+    Idle,
     /// the equalizer / progress bar / a notification countdown: ~30 frames a second
     Slow,
     /// a transition: ~60 frames a second
@@ -315,6 +323,11 @@ pub struct Ui {
     test_note: bool,
     sys_last: Vec<(String, bool, Instant)>,
     status_since: f32,
+    /// the resting pill's face: how happy it is (pointed at), and when something last happened (it falls asleep after a while)
+    face_happy: f32,
+    face_poke: f32,
+    face_wake: f32,
+    face_had_card: bool,
     /// the date and time shown in the home view (set by the window)
     clock: String,
     /// the home view was closed by a click: stays closed until the mouse has left
@@ -509,6 +522,10 @@ impl Ui {
             test_note: false,
             sys_last: Vec::new(),
             status_since: 0.0,
+            face_happy: 0.0,
+            face_poke: 0.0,
+            face_wake: -100.0,
+            face_had_card: false,
             clock: String::new(),
             open_block: false,
             card_expanded: false,
@@ -928,6 +945,17 @@ impl Ui {
             }
             self.sys_last.push((key, *connected, Instant::now()));
         }
+        if matches!(st, StatusData::Copied { .. }) {
+            if !self.cfg.copied_pill {
+                return;
+            }
+            // a copy often announces itself several times in a row
+            self.sys_last.retain(|(_, _, at)| at.elapsed().as_secs() < 10);
+            if self.sys_last.iter().any(|(k, _, at)| k == "copied" && at.elapsed().as_secs_f32() < 1.5) {
+                return;
+            }
+            self.sys_last.push(("copied".to_string(), true, Instant::now()));
+        }
         if let StatusData::Sys { key, on } = &st {
             // the same change reported twice (our own detector and Windows' toast)
             self.sys_last.retain(|(_, _, at)| at.elapsed().as_secs() < 10);
@@ -1219,6 +1247,20 @@ impl Ui {
             _ => (false, false),
         };
 
+        // the face: it smiles for a moment when a notification or a pill has just gone; anything happening wakes it up
+        let has_card = self.card.is_some() || self.bubble.is_some();
+        if self.face_had_card && !has_card {
+            self.face_wake = self.t_real;
+        }
+        self.face_had_card = has_card;
+        let want = if self.t_real - self.face_wake < 1.6 { 1.0 } else { 0.0 };
+        self.face_happy += (want - self.face_happy) * (1.0 - (-dt * 10.0).exp());
+        if self.face_happy < 0.002 {
+            self.face_happy = 0.0;
+        }
+        if over_pill || has_card || !self.queue.is_empty() || self.media.active || self.open {
+            self.face_poke = self.t_real;
+        }
         // while a card is up and the mouse is on it, the player must not pop open when the card ends
         if self.card.is_some() && over_pill {
             self.open_block = true;
@@ -1324,7 +1366,93 @@ impl Ui {
         if self.media.active && matches!(self.mode(), Mode::Play | Mode::Open) && (self.media.playing || self.open) && !self.is_hidden() {
             return Need::Slow;
         }
+        if self.face_visible() {
+            return if self.face_busy() {
+                Need::Slow
+            } else if self.face_sleepy() >= 0.999 {
+                Need::Rest
+            } else {
+                Need::Idle
+            };
+        }
         Need::Rest
+    }
+
+    // ---------- the face in the resting pill ----------
+
+    /// Is the little face on show: nothing playing, no card, the island not tucked away.
+    fn face_visible(&self) -> bool {
+        self.cfg.mascot && self.mode() == Mode::Idle && self.card.is_none() && self.ghost.is_none() && self.queue.is_empty() && self.bubble.is_none() && !self.is_hidden() && !self.concealed()
+    }
+
+    /// 0 awake .. 1 asleep: after a minute and a half of nothing happening it nods off.
+    fn face_sleepy(&self) -> f32 {
+        smooth((self.t_real - self.face_poke - 90.0) / 8.0)
+    }
+
+    /// Is something about the face moving right now (a blink, a glance, falling asleep, a smile)? A little ahead of time, so the faster timer is
+    /// already running when the movement starts.
+    fn face_busy(&self) -> bool {
+        let t = self.t_real;
+        let cyc = (t / FACE_BLINK_EVERY) as u32;
+        let blink = (t + 0.12) % FACE_BLINK_EVERY;
+        let glance = (t + 0.12) % FACE_GLANCE_EVERY;
+        let sleepy = self.face_sleepy();
+        blink < if cyc % 3 == 2 { 0.7 } else { 0.34 } || glance < 0.34 || self.face_happy > 0.0 || (sleepy > 0.0 && sleepy < 1.0)
+    }
+
+    /// How open the eyes are (0..1) and which way they look (-1 left .. 1 right).
+    fn face_eyes(&self) -> (f32, f32) {
+        let t = self.t_real;
+        let sleepy = self.face_sleepy();
+        // a blink: a quick close and open; every third time twice
+        let tri = |x: f32| if (0.0..0.2).contains(&x) { 1.0 - (x / 0.1 - 1.0).abs() } else { 0.0 };
+        let ph = t % FACE_BLINK_EVERY;
+        let mut closed = tri(ph);
+        if ((t / FACE_BLINK_EVERY) as u32) % 3 == 2 {
+            closed = closed.max(tri(ph - 0.34));
+        }
+        let open = lerp(1.0 - closed, 0.16, sleepy);
+        // a glance now and then, to one side and back
+        const LOOK: [f32; 10] = [0.0, -1.0, 0.0, 0.8, 0.0, 0.0, -0.6, 0.0, 1.0, 0.0];
+        let seg = (t / FACE_GLANCE_EVERY) as usize;
+        let (prev, next) = (LOOK[(seg + LOOK.len() - 1) % LOOK.len()], LOOK[seg % LOOK.len()]);
+        let e = smooth((t % FACE_GLANCE_EVERY) / 0.2);
+        (open, lerp(prev, next, e) * (1.0 - sleepy))
+    }
+
+    /// Two pill-shaped eyes; after a notification it smiles (the eyes turn into little arches and a smile appears).
+    fn draw_face(&mut self, x0: f32, y0: f32, w: f32, h: f32) {
+        let s = self.scale;
+        let a = smooth((w - 96.0) / 20.0) * smooth((h - 30.0) / 6.0) * clamp01(1.0 - self.content.x * 2.0);
+        if a <= 0.01 {
+            return;
+        }
+        let (open, look) = self.face_eyes();
+        let happy = self.face_happy;
+        let (cx, cy) = (x0 + w / 2.0, y0 + h / 2.0 - 2.0 * happy);
+        let (ew, eh) = (5.6, lerp(2.6, 12.5, open));
+        for side in [-1.0f32, 1.0] {
+            let ex = cx + side * 9.5 + look * 3.4;
+            gfx::fill_rrect(&mut self.pm, (ex - ew / 2.0) * s, (cy - eh / 2.0) * s, ew * s, eh * s, [ew / 2.0 * s; 4], WHITE, a * (1.0 - happy));
+        }
+        if happy > 0.01 {
+            let mut paint = tiny_skia::Paint::default();
+            paint.set_color_rgba8(255, 255, 255, (a * happy * 255.0) as u8);
+            paint.anti_alias = true;
+            let st = tiny_skia::Stroke { width: 2.4 * s, line_cap: tiny_skia::LineCap::Round, line_join: tiny_skia::LineJoin::Round, ..Default::default() };
+            let mut pb = tiny_skia::PathBuilder::new();
+            for side in [-1.0f32, 1.0] {
+                let ex = cx + side * 9.5;
+                pb.move_to((ex - 4.3) * s, (cy + 2.6) * s);
+                pb.quad_to(ex * s, (cy - 6.2) * s, (ex + 4.3) * s, (cy + 2.6) * s);
+            }
+            pb.move_to((cx - 4.6) * s, (cy + 8.0) * s);
+            pb.quad_to(cx * s, (cy + 12.4) * s, (cx + 4.6) * s, (cy + 8.0) * s);
+            if let Some(p) = pb.finish() {
+                self.pm.stroke_path(&p, &paint, &st, Transform::identity(), None);
+            }
+        }
     }
 
     // ---------- the open player ----------
@@ -1750,6 +1878,10 @@ impl Ui {
                 self.draw_open(x0, y0, w, h, a_open);
             }
         }
+        // nothing playing and nothing to show: the little face
+        if self.cfg.mascot && self.mode() == Mode::Idle && self.card.is_none() {
+            self.draw_face(x0, y0, w, h);
+        }
     }
 
     /// A logo in a badge of `size`: a circle (round / glyph), or a rounded square (`sq_radius`). No logo: the first letter on a coloured disc.
@@ -1868,6 +2000,13 @@ impl Ui {
                 self.fonts.draw(&mut self.pm, Weight::Semibold, &n, (x0 + 58.0) * s, (cy - 1.5) * s, 15.0 * s, WHITE, a);
                 let (txt, col) = if *connected { ("Connected", [48, 209, 88]) } else { ("Disconnected", GRAY) };
                 self.fonts.draw(&mut self.pm, Weight::Regular, txt, (x0 + 58.0) * s, (cy + 15.5) * s, 12.5 * s, col, a);
+            }
+            StatusData::Copied { kind } => {
+                let (label, color) = crate::sysicons::info("clipboard");
+                crate::sysicons::draw(&mut self.pm, "clipboard", (x0 + 31.0) * s, cy * s, 22.0 * s, color, a, true, pop);
+                self.fonts.draw(&mut self.pm, Weight::Semibold, label, (x0 + 52.0) * s, (cy + 5.4) * s, 15.0 * s, WHITE, a);
+                let tw = self.fonts.measure(Weight::Semibold, kind, 14.5 * s);
+                self.fonts.draw(&mut self.pm, Weight::Semibold, kind, (x0 + w - 22.0) * s - tw, (cy + 5.2) * s, 14.5 * s, GRAY, a);
             }
             StatusData::Battery { label, level, charging, low } => {
                 let green = [48, 209, 88];

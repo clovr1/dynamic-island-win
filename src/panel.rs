@@ -69,6 +69,8 @@ pub enum Id {
     DemoStatus,
     StatusPills,
     DevicePills,
+    CopiedPill,
+    Mascot,
     HidePopups,
     DndQuiet,
     Sounds,
@@ -414,6 +416,10 @@ impl Panel {
             self.preview.push_status(StatusData::Device { name: name.into(), kind, connected: true });
             return;
         }
+        if self.status_n % 7 == 0 {
+            self.preview.push_status(StatusData::Copied { kind: "Text".into() });
+            return;
+        }
         if self.status_n % 9 == 0 {
             self.preview.push_status(StatusData::Battery { label: "Charging".into(), level: 64, charging: true, low: false });
         } else {
@@ -556,6 +562,7 @@ impl Panel {
                 Row::Toggle(Id::HidePopups, "Only show them in Bloop", "While Bloop runs, Windows' own pop-ups are switched off for your apps (they come back when Bloop quits)", s.hide_windows_popups),
                 Row::Toggle(Id::StatusPills, "Status pills", "A slim pill when Wi-Fi, Bluetooth, airplane mode, battery ... change", s.status_pills),
                 Row::Toggle(Id::DevicePills, "Bluetooth device pills", "A pill with the device's picture (speaker, controller ...) when it connects", s.device_pills),
+                Row::Toggle(Id::CopiedPill, "Copied pill", "A small pill when you copy text, a picture or files (it never shows what was copied)", s.copied_pill),
                 Row::Toggle(Id::DndQuiet, "Respect Do Not Disturb", "While it is on, notifications are only listed in the island's home view", s.dnd_quiet),
                 Row::Slider(Id::CardSecs, "How long a card stays", "Seconds before it goes away", s.card_secs as f32, 2.0, 20.0, format!("{} s", s.card_secs)),
                 Row::Button(Id::Test, "Test", "Show a test notification now".into(), "Show".into(), 0),
@@ -567,6 +574,7 @@ impl Panel {
             4 => vec![
                 Row::Themes(s.theme),
                 Row::Toggle(Id::Sounds, "Sound effects", "Soft sounds for notifications, status pills and the play, pause and skip buttons (hovering is silent)", s.sounds),
+                Row::Toggle(Id::Mascot, "Pill face", "A little face in the pill while nothing is playing: it blinks, looks around, and falls asleep when it is quiet", s.mascot),
                 Row::Slider(Id::Volume, "Volume", "How loud the sound effects are", s.volume as f32, 0.0, 100.0, format!("{} %", s.volume)),
                 Row::Slider(Id::Scale, "Size", "Makes the whole island bigger or smaller", s.scale_pct as f32, 80.0, 140.0, format!("{} %", s.scale_pct)),
                 Row::Slider(Id::Speed, "Animation speed", "Slower is calmer, faster is snappier", s.speed_pct as f32, 50.0, 200.0, format!("{} %", s.speed_pct)),
@@ -1252,6 +1260,8 @@ impl Panel {
             Id::Bubble => "A small bubble while music plays",
             Id::StatusPills => "Wi-Fi, Bluetooth, battery ...",
             Id::DevicePills => "Speaker, controller ... connected",
+            Id::CopiedPill => "A pill when you copy something",
+            Id::Mascot => "A little face in the resting pill",
             Id::HidePopups => "No double pop-ups from Windows",
             Id::DndQuiet => "Only listed in the home view",
             Id::Sounds => "Notifications, pills, play / skip",
@@ -1557,6 +1567,8 @@ impl Panel {
             Id::CheckUpd => s.check_updates = !s.check_updates,
             Id::StatusPills => s.status_pills = !s.status_pills,
             Id::DevicePills => s.device_pills = !s.device_pills,
+            Id::CopiedPill => s.copied_pill = !s.copied_pill,
+            Id::Mascot => s.mascot = !s.mascot,
             Id::HidePopups => s.hide_windows_popups = !s.hide_windows_popups,
             Id::Sounds => s.sounds = !s.sounds,
             Id::PlayerVolume => s.player_volume = !s.player_volume,

@@ -176,6 +176,9 @@ impl App {
                 Need::Slow => {
                     SetTimer(self.hwnd, TIMER_ID, 33, None);
                 }
+                Need::Idle => {
+                    SetTimer(self.hwnd, TIMER_ID, 100, None);
+                }
                 Need::Rest | Need::Fast => {
                     let _ = KillTimer(self.hwnd, TIMER_ID);
                 }
@@ -541,6 +544,35 @@ impl App {
                 }
             }
         }
+        self.present();
+        self.kick();
+    }
+
+    /// Something was copied. The island only learns what KIND of thing (never its content), and stays out of it when the program that
+    /// copied it asked not to be recorded (password managers do).
+    fn on_clipboard(&mut self) {
+        use windows::Win32::System::DataExchange::{IsClipboardFormatAvailable, RegisterClipboardFormatW};
+        let kind = unsafe {
+            let private = ["ExcludeClipboardContentFromMonitorProcessing", "Clipboard Viewer Ignore"].iter().any(|name| {
+                let w: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+                let id = RegisterClipboardFormatW(PCWSTR(w.as_ptr()));
+                id != 0 && IsClipboardFormatAvailable(id).is_ok()
+            });
+            if private {
+                return;
+            }
+            // 15 = files, 13 / 1 = text, 8 / 17 / 2 = a picture
+            if IsClipboardFormatAvailable(15).is_ok() {
+                "Files"
+            } else if IsClipboardFormatAvailable(13).is_ok() || IsClipboardFormatAvailable(1).is_ok() {
+                "Text"
+            } else if IsClipboardFormatAvailable(8).is_ok() || IsClipboardFormatAvailable(17).is_ok() || IsClipboardFormatAvailable(2).is_ok() {
+                "Image"
+            } else {
+                return;
+            }
+        };
+        self.ui.push_status(StatusData::Copied { kind: kind.to_string() });
         self.present();
         self.kick();
     }
@@ -938,6 +970,8 @@ fn on_settings_action(a: Action) {
     }
 }
 
+const WM_CLIPBOARDUPDATE: u32 = 0x031D;
+
 extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let xy = |lp: LPARAM| ((lp.0 & 0xFFFF) as i16 as f32, ((lp.0 >> 16) & 0xFFFF) as i16 as f32);
     unsafe {
@@ -956,6 +990,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
                     a.apply_volume_request();
                     a.kick();
                 });
+                return LRESULT(0);
+            }
+            WM_CLIPBOARDUPDATE => {
+                with_app(|a| a.on_clipboard());
                 return LRESULT(0);
             }
             WM_MOUSELEAVE => {
@@ -1061,6 +1099,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
                 return LRESULT(0);
             }
             WM_DESTROY => {
+                let _ = windows::Win32::System::DataExchange::RemoveClipboardFormatListener(hwnd);
                 // Windows' own banners come back
                 crate::popups::restore();
                 remove_tray_icon(hwnd);
@@ -1176,6 +1215,7 @@ pub fn run() {
         media::start(hwnd.0 as isize, shared.clone());
         notify::start(hwnd.0 as isize, shared.clone());
         sys::start(hwnd.0 as isize, shared);
+        let _ = windows::Win32::System::DataExchange::AddClipboardFormatListener(hwnd);
         SetTimer(hwnd, TIMER_ENV, 1000, None);
         SetTimer(hwnd, TIMER_UPD, 25_000, None); // the first look for a new version, shortly after start
         settings_win::set_sink(Box::new(on_settings_action));

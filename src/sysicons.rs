@@ -16,6 +16,7 @@ pub fn info(key: &str) -> (&'static str, [u8; 3]) {
         "hotspot" => ("Hotspot", [48, 209, 88]),
         "nightlight" => ("Night Light", [255, 179, 64]),
         "energy" => ("Energy Saver", [255, 214, 10]),
+        "clipboard" => ("Copied", [100, 210, 255]),
         _ => ("", [10, 132, 255]),
     }
 }
@@ -37,6 +38,9 @@ struct Shapes {
     en_fill: Path,
     slash: Path,
     bolt: Path,
+    clip_board: Path,
+    clip_tab: Path,
+    clip_check: Path,
 }
 
 fn circle(cx: f32, cy: f32, r: f32) -> Path {
@@ -75,6 +79,9 @@ fn shapes() -> &'static Shapes {
             en_fill: rrect(4.4, 9.4, 13.2, 5.6, [1.8; 4]).unwrap(),
             slash: p("M4 3.5L20 20.5"),
             bolt: p("M13.2 2.5L5 13.4h5.6l-1.1 8.1L18.2 10h-5.7z"),
+            clip_board: rrect(5.0, 4.6, 14.0, 17.2, [2.6; 4]).unwrap(),
+            clip_tab: rrect(8.4, 2.4, 7.2, 4.2, [1.7; 4]).unwrap(),
+            clip_check: p("M8.8 14.2l2.3 2.4 4.3-5"),
         }
     })
 }
@@ -148,6 +155,11 @@ pub fn draw(pm: &mut Pixmap, key: &str, cx: f32, cy: f32, size: f32, rgb: [u8; 3
             }
         }
         "bolt" => fill(pm, &sh.bolt),
+        "clipboard" => {
+            stroke(pm, &sh.clip_board, 1.8);
+            fill(pm, &sh.clip_tab);
+            stroke(pm, &sh.clip_check, 1.9);
+        }
         _ => {}
     }
 }

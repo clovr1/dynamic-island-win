@@ -42,6 +42,10 @@ pub struct Settings {
     pub dnd_quiet: bool,
     /// a pill with the device's picture when a Bluetooth device connects
     pub device_pills: bool,
+    /// a small pill when something is copied (what kind of thing, never its content)
+    pub copied_pill: bool,
+    /// a little face in the resting pill (nothing playing)
+    pub mascot: bool,
     /// while Bloop runs, Windows' own notification banners are off (the island shows them instead)
     pub hide_windows_popups: bool,
     /// soft sound effects (opening, closing, notifications)
@@ -74,6 +78,8 @@ impl Default for Settings {
             status_pills: true,
             dnd_quiet: true,
             device_pills: true,
+            copied_pill: true,
+            mascot: true,
             hide_windows_popups: true,
             sounds: true,
             volume: 30,
@@ -132,6 +138,8 @@ impl Settings {
                 "lyrics_anim" => s.lyrics_anim = v.trim().parse().unwrap_or(0),
                 "lyrics_shift" => s.lyrics_shift = v.trim().parse().unwrap_or(20),
                 "device_pills" => s.device_pills = parse_bool(v).unwrap_or(s.device_pills),
+                "copied_pill" => s.copied_pill = parse_bool(v).unwrap_or(s.copied_pill),
+                "mascot" => s.mascot = parse_bool(v).unwrap_or(s.mascot),
                 "dnd_quiet" => s.dnd_quiet = parse_bool(v).unwrap_or(s.dnd_quiet),
                 "theme" => s.theme = v.trim().parse().unwrap_or(0),
                 _ => {}
@@ -163,7 +171,7 @@ impl Settings {
         format!(
             "# Bloop settings (you can edit this file; the island reads it when it starts)\n\
              show_music_pill = {}\nhide_when_player_front = {}\nnotifications = {}\nuse_bubble = {}\ncard_secs = {}\nlyrics_button = {}\n\
-             maximized = {}\nfullscreen_hide = {}\nscale_pct = {}\nspeed_pct = {}\naccent_eq = {}\ncheck_updates = {}\nupdate_repo = {}\ntheme = {}\nstatus_pills = {}\ndnd_quiet = {}\nsounds = {}\nvolume = {}\nplayer_volume = {}\ndevice_pills = {}\nhide_windows_popups = {}\nlyrics_shift = {}\nlyrics_anim = {}\n",
+             maximized = {}\nfullscreen_hide = {}\nscale_pct = {}\nspeed_pct = {}\naccent_eq = {}\ncheck_updates = {}\nupdate_repo = {}\ntheme = {}\nstatus_pills = {}\ndnd_quiet = {}\nsounds = {}\nvolume = {}\nplayer_volume = {}\ndevice_pills = {}\nhide_windows_popups = {}\nlyrics_shift = {}\nlyrics_anim = {}\ncopied_pill = {}\nmascot = {}\n",
             b(self.show_music_pill),
             b(self.hide_when_player_front),
             b(self.notifications),
@@ -190,7 +198,9 @@ impl Settings {
             b(self.device_pills),
             b(self.hide_windows_popups),
             self.lyrics_shift,
-            self.lyrics_anim
+            self.lyrics_anim,
+            b(self.copied_pill),
+            b(self.mascot)
         )
     }
 }

@@ -2,6 +2,13 @@
 
 All notable changes to Bloop. Newest first. Versions are the tags of the GitHub releases.
 
+## 0.24.0 - a pill for copying, and a face
+- **Copied pill:** when you copy something, a small pill says *Copied* and what kind of thing it was (Text, Image or Files). It never
+  shows or stores what was copied, and it stays quiet when the program asks not to be recorded (password managers do).
+  Settings → Notifications → *Copied pill*.
+- **Pill face:** while nothing is playing the resting pill has a little face made of pills. It blinks, glances around, smiles for a moment
+  after a notification and nods off after a minute and a half of quiet (then nothing runs at all). Settings → Look → *Pill face*.
+
 ## 0.23.x
 - **0.23.2** The Updates page is tidier: the switch, then the version with *Check now*. Added the website (`docs/`) and the developer-only
   *Install from a file* option (it appears only when `%APPDATA%\DynamicIsland\developer.txt` exists).
