@@ -27,6 +27,10 @@ pub enum SysMsg {
     Dnd { on: bool, first: bool },
     /// a Bluetooth device connected / disconnected
     Device { name: String, kind: crate::deviceicons::Kind, connected: bool },
+    /// the program using the microphone / camera now (None: nobody); `first`: the first reading (only remembered, no pill)
+    Privacy { mic: Option<String>, cam: Option<String>, first: bool },
+    /// a file is being downloaded into the Downloads folder
+    Download { name: String, bytes: u64, done: bool },
 }
 
 pub fn start(hwnd: isize, shared: Arc<Shared>) {

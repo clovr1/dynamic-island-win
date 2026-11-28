@@ -46,6 +46,10 @@ pub struct Settings {
     pub copied_pill: bool,
     /// a little face in the resting pill (nothing playing)
     pub mascot: bool,
+    /// a dot beside the island while a program uses the microphone or the camera (and a pill when it starts)
+    pub privacy_dots: bool,
+    /// a pill with the file's name while something is downloaded into the Downloads folder
+    pub download_pill: bool,
     /// while Bloop runs, Windows' own notification banners are off (the island shows them instead)
     pub hide_windows_popups: bool,
     /// soft sound effects (opening, closing, notifications)
@@ -80,6 +84,8 @@ impl Default for Settings {
             device_pills: true,
             copied_pill: true,
             mascot: true,
+            privacy_dots: true,
+            download_pill: true,
             hide_windows_popups: true,
             sounds: true,
             volume: 30,
@@ -140,6 +146,8 @@ impl Settings {
                 "device_pills" => s.device_pills = parse_bool(v).unwrap_or(s.device_pills),
                 "copied_pill" => s.copied_pill = parse_bool(v).unwrap_or(s.copied_pill),
                 "mascot" => s.mascot = parse_bool(v).unwrap_or(s.mascot),
+                "privacy_dots" => s.privacy_dots = parse_bool(v).unwrap_or(s.privacy_dots),
+                "download_pill" => s.download_pill = parse_bool(v).unwrap_or(s.download_pill),
                 "dnd_quiet" => s.dnd_quiet = parse_bool(v).unwrap_or(s.dnd_quiet),
                 "theme" => s.theme = v.trim().parse().unwrap_or(0),
                 _ => {}
@@ -171,7 +179,7 @@ impl Settings {
         format!(
             "# Bloop settings (you can edit this file; the island reads it when it starts)\n\
              show_music_pill = {}\nhide_when_player_front = {}\nnotifications = {}\nuse_bubble = {}\ncard_secs = {}\nlyrics_button = {}\n\
-             maximized = {}\nfullscreen_hide = {}\nscale_pct = {}\nspeed_pct = {}\naccent_eq = {}\ncheck_updates = {}\nupdate_repo = {}\ntheme = {}\nstatus_pills = {}\ndnd_quiet = {}\nsounds = {}\nvolume = {}\nplayer_volume = {}\ndevice_pills = {}\nhide_windows_popups = {}\nlyrics_shift = {}\nlyrics_anim = {}\ncopied_pill = {}\nmascot = {}\n",
+             maximized = {}\nfullscreen_hide = {}\nscale_pct = {}\nspeed_pct = {}\naccent_eq = {}\ncheck_updates = {}\nupdate_repo = {}\ntheme = {}\nstatus_pills = {}\ndnd_quiet = {}\nsounds = {}\nvolume = {}\nplayer_volume = {}\ndevice_pills = {}\nhide_windows_popups = {}\nlyrics_shift = {}\nlyrics_anim = {}\ncopied_pill = {}\nmascot = {}\nprivacy_dots = {}\ndownload_pill = {}\n",
             b(self.show_music_pill),
             b(self.hide_when_player_front),
             b(self.notifications),
@@ -200,7 +208,9 @@ impl Settings {
             self.lyrics_shift,
             self.lyrics_anim,
             b(self.copied_pill),
-            b(self.mascot)
+            b(self.mascot),
+            b(self.privacy_dots),
+            b(self.download_pill)
         )
     }
 }

@@ -2,6 +2,13 @@
 
 All notable changes to Bloop. Newest first. Versions are the tags of the GitHub releases.
 
+## 0.25.0 - who is listening, what is arriving
+- **Microphone and camera dot:** a small dot beside the island (orange: microphone, green: camera) while a program uses them, and a pill
+  with the program's name when one starts. It reads the list Windows keeps for its own privacy settings. Settings → Notifications.
+- **Download pill:** while a browser downloads a file into your Downloads folder (Chrome, Edge, Firefox, Opera ...), a pill shows its name
+  and size so far, with a light running along a track (the total size is not known, so there is no percentage), and says *Downloaded* when
+  it is done. A message always takes over the island at once. Settings → Notifications.
+
 ## 0.24.0 - a pill for copying, and a face
 - **Copied pill:** when you copy something, a small pill says *Copied* and what kind of thing it was (Text, Image or Files). It never
   shows or stores what was copied, and it stays quiet when the program asks not to be recorded (password managers do).

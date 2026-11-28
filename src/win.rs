@@ -487,6 +487,8 @@ impl App {
             crate::sound::set_enabled(s.sounds);
         }
         self.settings = s.clone();
+        crate::watch::PRIVACY_ON.store(s.privacy_dots, Ordering::Relaxed);
+        crate::watch::DOWNLOAD_ON.store(s.download_pill, Ordering::Relaxed);
         save_settings(&s);
         self.ui.set_settings(&s);
         if size_changed {
@@ -536,6 +538,8 @@ impl App {
                 SysMsg::Toggle(key, on) => self.ui.push_status(StatusData::Sys { key, on }),
                 SysMsg::Battery { label, level, charging, low } => self.ui.push_status(StatusData::Battery { label, level, charging, low }),
                 SysMsg::Device { name, kind, connected } => self.ui.push_status(StatusData::Device { name, kind, connected }),
+                SysMsg::Privacy { mic, cam, first } => self.ui.set_privacy(mic, cam, first),
+                SysMsg::Download { name, bytes, done } => self.ui.push_status(StatusData::Download { name, bytes, done }),
                 SysMsg::Dnd { on, first } => {
                     self.ui.set_dnd(on);
                     if !first {
@@ -1207,6 +1211,8 @@ pub fn run() {
         SelectObject(mem_dc, bmp);
 
         let shared = Arc::new(Shared::default());
+        crate::watch::PRIVACY_ON.store(settings.privacy_dots, Ordering::Relaxed);
+        crate::watch::DOWNLOAD_ON.store(settings.download_pill, Ordering::Relaxed);
         APP.with(|a| {
             *a.borrow_mut() = Some(App { hwnd, ui, mem_dc, bits: bits as *mut u8, pw, ph, shared: shared.clone(), tracking: false, timer: Need::Rest, last: Instant::now(), bmp, dpi_scale, settings, update_ready: None, clock: String::new(), ticks: 0 });
         });
@@ -1214,6 +1220,7 @@ pub fn run() {
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         media::start(hwnd.0 as isize, shared.clone());
         notify::start(hwnd.0 as isize, shared.clone());
+        crate::watch::start(hwnd.0 as isize, shared.clone());
         sys::start(hwnd.0 as isize, shared);
         let _ = windows::Win32::System::DataExchange::AddClipboardFormatListener(hwnd);
         SetTimer(hwnd, TIMER_ENV, 1000, None);

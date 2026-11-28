@@ -41,6 +41,9 @@ struct Shapes {
     clip_board: Path,
     clip_tab: Path,
     clip_check: Path,
+    dl_arrow: Path,
+    dl_tray: Path,
+    check: Path,
 }
 
 fn circle(cx: f32, cy: f32, r: f32) -> Path {
@@ -82,6 +85,9 @@ fn shapes() -> &'static Shapes {
             clip_board: rrect(5.0, 4.6, 14.0, 17.2, [2.6; 4]).unwrap(),
             clip_tab: rrect(8.4, 2.4, 7.2, 4.2, [1.7; 4]).unwrap(),
             clip_check: p("M8.8 14.2l2.3 2.4 4.3-5"),
+            dl_arrow: p("M12 4v10.5M7.4 10.2l4.6 4.6 4.6-4.6"),
+            dl_tray: p("M5 19.5h14"),
+            check: p("M5.5 12.8l4.2 4.2 8.8-9.5"),
         }
     })
 }
@@ -155,6 +161,11 @@ pub fn draw(pm: &mut Pixmap, key: &str, cx: f32, cy: f32, size: f32, rgb: [u8; 3
             }
         }
         "bolt" => fill(pm, &sh.bolt),
+        "download" => {
+            stroke(pm, &sh.dl_arrow, 2.2);
+            stroke(pm, &sh.dl_tray, 2.2);
+        }
+        "check" => stroke(pm, &sh.check, 2.6),
         "clipboard" => {
             stroke(pm, &sh.clip_board, 1.8);
             fill(pm, &sh.clip_tab);

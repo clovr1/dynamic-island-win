@@ -95,6 +95,9 @@ pub fn status_sound_code(st: &StatusData) -> u8 {
             }
         }
         StatusData::Copied { .. } => 15,
+        StatusData::Privacy { .. } => 11,
+        StatusData::Download { done: true, .. } => 16,
+        StatusData::Download { .. } => 15,
         StatusData::Battery { low: true, .. } => 18,
         StatusData::Battery { charging: true, .. } => 16,
         StatusData::Battery { .. } => 17,
@@ -112,6 +115,10 @@ pub enum StatusData {
     Device { name: String, kind: crate::deviceicons::Kind, connected: bool },
     /// something was copied: "Text", "Image" or "Files" (never the content)
     Copied { kind: String },
+    /// a program started using the microphone ("microphone") or the camera ("camera")
+    Privacy { kind: String, app: String },
+    /// a file is being downloaded (`done`: it is finished); the total size is not known, so there is no percentage
+    Download { name: String, bytes: u64, done: bool },
 }
 
 #[derive(Clone)]
@@ -328,6 +335,10 @@ pub struct Ui {
     face_poke: f32,
     face_wake: f32,
     face_had_card: bool,
+    /// who uses the microphone / camera now, which dots to draw (kept while the dot fades out), and the dot's entrance
+    privacy: (Option<String>, Option<String>),
+    privacy_shown: (bool, bool),
+    privacy_k: Tween,
     /// the date and time shown in the home view (set by the window)
     clock: String,
     /// the home view was closed by a click: stays closed until the mouse has left
@@ -526,6 +537,9 @@ impl Ui {
             face_poke: 0.0,
             face_wake: -100.0,
             face_had_card: false,
+            privacy: (None, None),
+            privacy_shown: (false, false),
+            privacy_k: Tween::new(0.0),
             clock: String::new(),
             open_block: false,
             card_expanded: false,
@@ -549,14 +563,14 @@ impl Ui {
     }
 
     fn tweens_mut(&mut self) -> Vec<&mut Tween> {
-        let mut v: Vec<&mut Tween> = vec![&mut self.w, &mut self.h, &mut self.y, &mut self.rt, &mut self.rb, &mut self.tuck, &mut self.tuck_a, &mut self.shift, &mut self.bubble_k, &mut self.pad, &mut self.content, &mut self.lyr_scroll, &mut self.lyr_k, &mut self.open_k, &mut self.vol_k, &mut self.press_pill, &mut self.track_k];
+        let mut v: Vec<&mut Tween> = vec![&mut self.w, &mut self.h, &mut self.y, &mut self.rt, &mut self.rb, &mut self.tuck, &mut self.tuck_a, &mut self.shift, &mut self.bubble_k, &mut self.pad, &mut self.content, &mut self.lyr_scroll, &mut self.lyr_k, &mut self.open_k, &mut self.vol_k, &mut self.press_pill, &mut self.track_k, &mut self.privacy_k];
         v.extend(self.btn_hover.iter_mut());
         v.extend(self.btn_press.iter_mut());
         v
     }
 
     fn tweens(&self) -> Vec<&Tween> {
-        let mut v: Vec<&Tween> = vec![&self.w, &self.h, &self.y, &self.rt, &self.rb, &self.tuck, &self.tuck_a, &self.shift, &self.bubble_k, &self.pad, &self.content, &self.lyr_scroll, &self.lyr_k, &self.open_k, &self.vol_k, &self.press_pill, &self.track_k];
+        let mut v: Vec<&Tween> = vec![&self.w, &self.h, &self.y, &self.rt, &self.rb, &self.tuck, &self.tuck_a, &self.shift, &self.bubble_k, &self.pad, &self.content, &self.lyr_scroll, &self.lyr_k, &self.open_k, &self.vol_k, &self.press_pill, &self.track_k, &self.privacy_k];
         v.extend(self.btn_hover.iter());
         v.extend(self.btn_press.iter());
         v
@@ -566,6 +580,7 @@ impl Ui {
     pub fn set_settings(&mut self, s: &Settings) {
         self.cfg = s.clone();
         self.speed = s.speed_pct as f32 / 100.0;
+        self.privacy_retarget();
         if !s.lyrics_button && self.lyrics_on {
             self.lyrics_on = false;
         }
@@ -928,10 +943,59 @@ impl Ui {
         if n > 0 { 66.0 + 44.0 * n as f32 } else { 112.0 }
     }
 
+    /// Who is using the microphone / camera now (a program's name), or nobody. A use that has just started gets a pill; while it lasts, a
+    /// small dot (orange: microphone, green: camera) sits beside the island.
+    pub fn set_privacy(&mut self, mic: Option<String>, cam: Option<String>, first: bool) {
+        let (old_mic, old_cam) = self.privacy.clone();
+        self.privacy = (mic.clone(), cam.clone());
+        if mic.is_some() || cam.is_some() {
+            self.privacy_shown = (mic.is_some(), cam.is_some());
+        }
+        self.privacy_retarget();
+        if !first {
+            if let (None, Some(app)) = (&old_mic, &mic) {
+                self.push_status(StatusData::Privacy { kind: "microphone".into(), app: app.clone() });
+            }
+            if let (None, Some(app)) = (&old_cam, &cam) {
+                self.push_status(StatusData::Privacy { kind: "camera".into(), app: app.clone() });
+            }
+        }
+    }
+
+    fn privacy_retarget(&mut self) {
+        let on = self.cfg.privacy_dots && (self.privacy.0.is_some() || self.privacy.1.is_some());
+        let now = self.t;
+        self.privacy_k.go(if on { 1.0 } else { 0.0 }, now, 0.5, 0.0, SPRING);
+    }
+
     /// A system change (Wi-Fi, battery ...): the slim status pill.
     pub fn push_status(&mut self, st: StatusData) {
         if !self.cfg.status_pills {
             return;
+        }
+        let (is_dl, dl_done) = match &st {
+            StatusData::Download { done, .. } => (true, *done),
+            _ => (false, false),
+        };
+        if matches!(st, StatusData::Privacy { .. }) && !self.cfg.privacy_dots {
+            return;
+        }
+        if is_dl {
+            if !self.cfg.download_pill {
+                return;
+            }
+            // progress: while the download's pill is up it only changes in place (no new sound, no new entrance)
+            if let Some(c) = self.card.as_mut() {
+                if matches!(c.n.status, Some(StatusData::Download { done: false, .. })) && !dl_done {
+                    c.n.status = Some(st);
+                    c.left = 3.5;
+                    return;
+                }
+            }
+            // a download that is merely running never pushes anything else off the screen
+            if !dl_done && (self.card.is_some() || self.bubble.is_some() || !self.queue.is_empty()) {
+                return;
+            }
         }
         if let StatusData::Device { name, connected, .. } = &st {
             if !self.cfg.device_pills {
@@ -989,6 +1053,12 @@ impl Ui {
     pub fn push_notification(&mut self, d: NotifData) {
         if !self.cfg.notifications {
             return;
+        }
+        // a download's pill gives way at once to a message
+        if let Some(c) = self.card.as_mut() {
+            if matches!(c.n.status, Some(StatusData::Download { done: false, .. })) {
+                c.left = c.left.min(0.3);
+            }
         }
         let icon = d.icon.and_then(make_icon).map(std::rc::Rc::new);
         let mut n = Notif { app: d.app, aumid: d.aumid, title: d.title, body: d.body, icon, count: 1, status: None };
@@ -1114,7 +1184,7 @@ impl Ui {
         let hang = self.attached();
         let home = !self.media.active;
         let status = self.card.as_ref().map(|c| c.n.status.is_some()).unwrap_or(false);
-        let dev = matches!(self.card.as_ref().and_then(|c| c.n.status.as_ref()), Some(StatusData::Device { .. }));
+        let dev = matches!(self.card.as_ref().and_then(|c| c.n.status.as_ref()), Some(StatusData::Device { .. }) | Some(StatusData::Download { .. }));
         let (w, h, y, rt, rb) = match self.mode() {
             Mode::Idle => (120.0, 36.0, TOP, 18.0, 18.0),
             Mode::Play if notch => (if self.lyric_line_active() && !self.line_text.is_empty() { self.notch_line_w } else { NOTCH_W }, 28.0, 0.0, 0.0, 17.0),
@@ -1376,6 +1446,39 @@ impl Ui {
             };
         }
         Need::Rest
+    }
+
+    /// A small black capsule beside the island with a dot in it: orange while a program uses the microphone, green for the camera.
+    fn draw_privacy(&mut self, x0: f32, ytop: f32, h: f32) {
+        let k = self.privacy_k.x;
+        if k <= 0.01 || h > 80.0 {
+            return;
+        }
+        let (mic, cam) = self.privacy_shown;
+        let n = mic as usize + cam as usize;
+        if n == 0 {
+            return;
+        }
+        let s = self.scale;
+        let grow = 0.35 + 0.65 * k.min(1.2);
+        let a = clamp01(k * 1.5);
+        let full_w = if n == 2 { 44.0 } else { 24.0 };
+        let (cw, ch) = (full_w * grow, 24.0 * grow);
+        let cx = x0 - 8.0 - full_w / 2.0;
+        let cy = ytop + h.min(44.0) / 2.0;
+        gfx::fill_rrect(&mut self.pm, (cx - cw / 2.0) * s, (cy - ch / 2.0) * s, cw * s, ch * s, [ch / 2.0 * s; 4], BLACK, a);
+        let mut cols: Vec<[u8; 3]> = Vec::new();
+        if mic {
+            cols.push([255, 159, 10]);
+        }
+        if cam {
+            cols.push([48, 209, 88]);
+        }
+        for (i, col) in cols.iter().enumerate() {
+            let dx = cx + (i as f32 - (n as f32 - 1.0) / 2.0) * 20.0 * grow;
+            let r = 4.6 * grow;
+            gfx::fill_rrect(&mut self.pm, (dx - r) * s, (cy - r) * s, 2.0 * r * s, 2.0 * r * s, [r * s; 4], *col, a);
+        }
     }
 
     // ---------- the face in the resting pill ----------
@@ -1741,6 +1844,11 @@ impl Ui {
         let (rt, rb) = (self.rt.x, self.rb.x);
         let p = gfx::rrect(x0 * s, y0 * s, w * s, h * s, [rt * s, rt * s, rb * s, rb * s])?;
         mask.fill_path(&p, FillRule::Winding, true, Transform::identity());
+        if self.privacy_k.x > 0.02 {
+            if let Some(b) = gfx::rrect((x0 - 78.0) * s, (y0 - 4.0).max(0.0) * s, 74.0 * s, 56.0 * s, [0.0; 4]) {
+                mask.fill_path(&b, FillRule::Winding, true, Transform::identity());
+            }
+        }
         if self.bubble.is_some() && self.bubble_k.x > 0.02 {
             let (bx, by, bw, bh) = self.bubble_rect();
             let m = 10.0;
@@ -1796,6 +1904,7 @@ impl Ui {
         if self.bubble.is_some() && self.bubble_k.x > 0.02 {
             self.draw_bubble();
         }
+        self.draw_privacy(x0, ytop, h_full);
 
         if self.card.as_ref().map(|c| c.n.status.is_some()).unwrap_or(false) {
             let st = self.card.as_ref().and_then(|c| c.n.status.clone()).unwrap();
@@ -2007,6 +2116,48 @@ impl Ui {
                 self.fonts.draw(&mut self.pm, Weight::Semibold, label, (x0 + 52.0) * s, (cy + 5.4) * s, 15.0 * s, WHITE, a);
                 let tw = self.fonts.measure(Weight::Semibold, kind, 14.5 * s);
                 self.fonts.draw(&mut self.pm, Weight::Semibold, kind, (x0 + w - 22.0) * s - tw, (cy + 5.2) * s, 14.5 * s, GRAY, a);
+            }
+            StatusData::Privacy { kind, app } => {
+                let (label, col) = if kind == "camera" { ("Camera", [48u8, 209, 88]) } else { ("Microphone", [255u8, 159, 10]) };
+                let r = 6.5 * (0.55 + 0.45 * pop);
+                gfx::fill_rrect(&mut self.pm, (x0 + 31.0 - r - 4.0) * s, (cy - r - 4.0) * s, (r + 4.0) * 2.0 * s, (r + 4.0) * 2.0 * s, [(r + 4.0) * s; 4], col, a * 0.22);
+                gfx::fill_rrect(&mut self.pm, (x0 + 31.0 - r) * s, (cy - r) * s, 2.0 * r * s, 2.0 * r * s, [r * s; 4], col, a);
+                self.fonts.draw(&mut self.pm, Weight::Semibold, label, (x0 + 52.0) * s, (cy + 5.4) * s, 15.0 * s, WHITE, a);
+                let lw = self.fonts.measure(Weight::Semibold, label, 15.0 * s) / s;
+                let max_w = (w - 52.0 - lw - 22.0 - 14.0).max(30.0);
+                let t = self.fonts.fit(Weight::Semibold, app, 14.5 * s, max_w * s);
+                let tw = self.fonts.measure(Weight::Semibold, &t, 14.5 * s);
+                self.fonts.draw(&mut self.pm, Weight::Semibold, &t, (x0 + w - 22.0) * s - tw, (cy + 5.2) * s, 14.5 * s, GRAY, a);
+            }
+            StatusData::Download { name, bytes, done } => {
+                let (icon, col) = if *done { ("check", [48u8, 209, 88]) } else { ("download", [10u8, 132, 255]) };
+                crate::sysicons::draw(&mut self.pm, icon, (x0 + 31.0) * s, (cy - 0.5) * s, 24.0 * s, col, a, true, pop);
+                let max_w = (w - 58.0 - 18.0).max(40.0);
+                let n = self.fonts.fit(Weight::Semibold, name, 15.5 * s, max_w * s);
+                self.fonts.draw(&mut self.pm, Weight::Semibold, &n, (x0 + 58.0) * s, (cy - 1.5) * s, 15.0 * s, WHITE, a);
+                let size = crate::watchlogic::fmt_bytes(*bytes);
+                if *done {
+                    self.fonts.draw(&mut self.pm, Weight::Regular, "Downloaded", (x0 + 58.0) * s, (cy + 15.5) * s, 12.5 * s, [48, 209, 88], a);
+                    let tw = self.fonts.measure(Weight::Regular, &size, 12.5 * s);
+                    self.fonts.draw(&mut self.pm, Weight::Regular, &size, (x0 + w - 22.0) * s - tw, (cy + 15.5) * s, 12.5 * s, GRAY, a);
+                } else {
+                    let txt = format!("{size} - downloading");
+                    self.fonts.draw(&mut self.pm, Weight::Regular, &txt, (x0 + 58.0) * s, (cy + 15.5) * s, 12.5 * s, GRAY, a);
+                    // the total size is not known: no percentage, a light that runs along a track
+                    let tw = self.fonts.measure(Weight::Regular, &txt, 12.5 * s) / s;
+                    let bx = x0 + 58.0 + tw + 12.0;
+                    let bw = (x0 + w - 22.0) - bx;
+                    if bw > 24.0 {
+                        let (by, bh) = (cy + 11.3, 3.6);
+                        gfx::fill_rrect(&mut self.pm, bx * s, by * s, bw * s, bh * s, [bh / 2.0 * s; 4], [58, 58, 60], a);
+                        let seg = bw * 0.38;
+                        let hx = bx + (bw + seg) * (self.t_real * 0.9).fract() - seg;
+                        let (l, r) = (hx.max(bx), (hx + seg).min(bx + bw));
+                        if r > l {
+                            gfx::fill_rrect(&mut self.pm, l * s, by * s, (r - l) * s, bh * s, [bh / 2.0 * s; 4], [10, 132, 255], a);
+                        }
+                    }
+                }
             }
             StatusData::Battery { label, level, charging, low } => {
                 let green = [48, 209, 88];

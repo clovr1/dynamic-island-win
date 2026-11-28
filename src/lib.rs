@@ -9,6 +9,7 @@ pub mod svgpath;
 pub mod sysicons;
 pub mod ui;
 pub mod version;
+pub mod watchlogic;
 
 #[cfg(windows)]
 pub mod media;
@@ -28,5 +29,7 @@ pub mod settings_win;
 pub mod update;
 #[cfg(windows)]
 pub mod notify;
+#[cfg(windows)]
+pub mod watch;
 #[cfg(windows)]
 pub mod win;

@@ -38,7 +38,7 @@ window at the top edge of the screen and everything inside it by itself.
 | <img src="docs/img/card.png" alt="A notification card" width="420"> | **Notifications** as a card, or as a small bubble beside the music pill. Click to unfold. Each app keeps its own logo. While Bloop runs, Windows' own pop-ups are hidden so you do not see everything twice. |
 | <img src="docs/img/status.png" alt="Status pills" width="420"> | **Status pills** for Wi-Fi, Bluetooth, airplane mode, hotspot, night light, energy saver, Do Not Disturb and battery, each with its own soft sound. A Bluetooth speaker, headphones or controller floats in with its own picture. |
 
-More: a **Copied** pill when you copy text, a picture or files (it never shows what was copied), a little **face** in the resting pill that blinks, looks around and smiles, a slim **notch** under maximized windows, the island **tucks away** in full screen (and peeks out when you move the mouse to the
+More: a **Copied** pill when you copy text, a picture or files (it never shows what was copied), a **dot** beside the island while a program uses the microphone or camera, a **download** pill with the file's name and size, a little **face** in the resting pill that blinks, looks around and smiles, a slim **notch** under maximized windows, the island **tucks away** in full screen (and peeks out when you move the mouse to the
 top edge), **six colour themes**, adjustable size and animation speed, and a settings window with a **live preview** where nothing
 changes until you press Save.
 
@@ -64,6 +64,9 @@ No accounts, no tracking. Bloop talks to the internet in two cases only:
 
 * **lrclib.net**: the title, artist and length of the song, only when you switch lyrics on.
 * **github.com**: asking whether a newer version exists (switch it off in Settings → Updates).
+
+Everything else stays on your PC. The microphone / camera dot reads the list Windows itself keeps of which program used them, and the
+download pill only looks at file names and sizes in your Downloads folder.
 
 ## Build from source
 

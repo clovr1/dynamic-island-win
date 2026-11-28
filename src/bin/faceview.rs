@@ -55,6 +55,38 @@ fn main() {
         o.draw_pixmap(-(((W / 2.0 - 165.0) * S) as i32), -(((TOP - 6.0) * S) as i32), img.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
         shots.push(o);
     }
+    // the microphone / camera dot beside the resting pill, and the pill of a program that starts listening
+    let wide = |ui: &mut Ui| {
+        let (w, h) = (330.0 * S, 62.0 * S);
+        let mut o = Pixmap::new(w as u32, h as u32).unwrap();
+        o.fill(Color::from_rgba8(60, 64, 80, 255));
+        let img = ui.render().clone();
+        o.draw_pixmap(-(((W / 2.0 - 165.0) * S) as i32), -(((TOP - 6.0) * S) as i32), img.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+        o
+    };
+    let mut ui = mk();
+    ui.set_privacy(Some("Chrome".into()), None, true);
+    run_to(&mut ui, 0.0, 1.0);
+    shots.push(wide(&mut ui));
+    let mut ui = mk();
+    ui.set_privacy(Some("Zoom".into()), Some("Zoom".into()), true);
+    run_to(&mut ui, 0.0, 1.0);
+    shots.push(wide(&mut ui));
+    let mut ui = mk();
+    ui.set_privacy(Some("Chrome".into()), None, false);
+    run_to(&mut ui, 0.0, 1.0);
+    shots.push(wide(&mut ui));
+    let mut ui = mk();
+    ui.set_privacy(None, Some("Windows Camera".into()), false);
+    run_to(&mut ui, 0.0, 1.0);
+    shots.push(wide(&mut ui));
+    // a download: running, then finished
+    for (name, bytes, done) in [("Bloop-setup-0.24.0-x64.exe", 13_400_000u64, false), ("film.mp4", 734_003_200, true)] {
+        let mut ui = mk();
+        ui.push_status(StatusData::Download { name: name.into(), bytes, done });
+        run_to(&mut ui, 0.0, 1.0);
+        shots.push(wide(&mut ui));
+    }
     let sw = shots.iter().map(|p| p.width()).max().unwrap();
     let sh: u32 = shots.iter().map(|p| p.height() + 10).sum();
     let mut sheet = Pixmap::new(sw, sh).unwrap();
