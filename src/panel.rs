@@ -1285,7 +1285,7 @@ impl Panel {
                 }
                 Row::LyrAnims(chosen) => {
                     out.push(Piece::Heading("How the lyrics move".into()));
-                    let names = [("Smooth", "Glide, the lit line grows"), ("Instant", "Quick jumps, no frills"), ("Focus", "The lit line pops, the rest fades back"), ("Karaoke", "Words light up as they are sung")];
+                    let names = [("Smooth", "Lines glide, the lit one grows"), ("Karaoke", "Words light up as they are sung")];
                     for (i, (n, d)) in names.iter().enumerate() {
                         out.push(Piece::Chip { id: Id::LyrAnim(i as u8), label: n.to_string(), desc: d.to_string(), on: *chosen as usize == i, radio: true });
                     }
@@ -1565,7 +1565,7 @@ impl Panel {
                 if s.lyrics_anim == n {
                     return None;
                 }
-                s.lyrics_anim = n.min(3);
+                s.lyrics_anim = n.min(1);
             }
             Id::MaxOpt(n) => {
                 s.maximized = [MaxMode::Notch, MaxMode::Hide, MaxMode::Normal][n as usize % 3];

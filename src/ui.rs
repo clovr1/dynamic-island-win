@@ -717,7 +717,7 @@ impl Ui {
             0.0
         };
         if self.t >= self.lyr_manual_until {
-            let dur = [0.6, 0.18, 0.7, 0.6][(self.cfg.lyrics_anim as usize).min(3)];
+            let dur = [0.6, 0.6][(self.cfg.lyrics_anim as usize).min(1)];
             self.lyr_scroll.go(target, self.t, dur, 0.0, Curve(0.3, 0.9, 0.3, 1.0));
         }
         // the pill shows this line, and is as wide as the line needs
@@ -1315,7 +1315,7 @@ impl Ui {
             return Need::Fast;
         }
         // the karaoke wipe moves every frame
-        if self.lyr_view() && self.cfg.lyrics_anim == 3 && self.media.playing && self.lyr_synced && self.lyr_status == LyrStatus::Ready && self.lyr_idx >= 0 {
+        if self.lyr_view() && self.cfg.lyrics_anim == 1 && self.media.playing && self.lyr_synced && self.lyr_status == LyrStatus::Ready && self.lyr_idx >= 0 {
             return Need::Fast;
         }
         if self.card.is_some() || self.bubble.is_some() || !self.queue.is_empty() || self.gap > 0.0 {
@@ -2083,7 +2083,7 @@ impl Ui {
                 let (px, lh) = if self.lyr_synced { (19.0, 23.75) } else { (15.0, 18.75) };
                 let scroll = if self.lyr_synced { self.lyr_scroll.x } else { 0.0 };
                 // the animation style the user chose: 0 smooth, 1 instant, 2 focus, 3 karaoke
-                let style = (self.cfg.lyrics_anim as usize).min(3);
+                let style = if self.cfg.lyrics_anim == 1 { 3 } else { 0 };
                 let lit_dur = [0.3, 0.1, 0.4, 0.45][style];
                 let (dim_a, dim_s, lit_s) = [(0.34, 0.93, 1.0), (0.42, 1.0, 1.0), (0.22, 0.84, 1.06), (0.34, 0.86, 1.07)][style];
                 // the lit line's progress (for the karaoke wipe). A synced file only gives where a line starts, not where it ends, so the time

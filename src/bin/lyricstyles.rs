@@ -8,7 +8,7 @@ fn main() {
     let out = std::env::args().nth(1).unwrap_or_else(|| ".".into());
     let mut sheet = Pixmap::new(940, 560).unwrap();
     sheet.fill(Color::from_rgba8(40, 70, 60, 255));
-    for style in 0..4u8 {
+    for style in 0..2u8 {
         let mut ui = Ui::new(1.0);
         let mut s = Settings::default();
         s.lyrics_anim = style;

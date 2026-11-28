@@ -61,7 +61,7 @@ impl Default for Settings {
             use_bubble: true,
             card_secs: 5,
             lyrics_button: true,
-            lyrics_shift: 30,
+            lyrics_shift: 20,
             lyrics_anim: 0,
             maximized: MaxMode::Notch,
             fullscreen_hide: true,
@@ -130,7 +130,7 @@ impl Settings {
                 "volume" => s.volume = v.trim().parse().unwrap_or(30),
                 "hide_windows_popups" => s.hide_windows_popups = parse_bool(v).unwrap_or(s.hide_windows_popups),
                 "lyrics_anim" => s.lyrics_anim = v.trim().parse().unwrap_or(0),
-                "lyrics_shift" => s.lyrics_shift = v.trim().parse().unwrap_or(30),
+                "lyrics_shift" => s.lyrics_shift = v.trim().parse().unwrap_or(20),
                 "device_pills" => s.device_pills = parse_bool(v).unwrap_or(s.device_pills),
                 "dnd_quiet" => s.dnd_quiet = parse_bool(v).unwrap_or(s.dnd_quiet),
                 "theme" => s.theme = v.trim().parse().unwrap_or(0),
@@ -148,7 +148,8 @@ impl Settings {
         self.theme = self.theme.min(5);
         self.volume = self.volume.min(100);
         self.lyrics_shift = self.lyrics_shift.min(60);
-        self.lyrics_anim = self.lyrics_anim.min(3);
+        // 0 smooth, 1 karaoke (older files had four styles: karaoke was 3, the others become smooth)
+        self.lyrics_anim = if self.lyrics_anim >= 3 { 1 } else if self.lyrics_anim == 1 { 1 } else { 0 };
         // an "owner/repo" is letters, digits, - _ . and one slash; anything else is dropped
         let ok = self.update_repo.split('/').count() == 2 && self.update_repo.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c));
         if !ok {
