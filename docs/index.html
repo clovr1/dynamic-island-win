@@ -260,6 +260,14 @@ footer a { color: var(--dim); }
 .rng { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; font-size: 14.5px; margin-bottom: 10px; } .rng output { color: var(--dim); font-variant-numeric: tabular-nums; }
 .rng input { grid-column: 1 / -1; width: 100%; accent-color: var(--orange); }
 .hint { margin: 14px 0 0; color: var(--dim); font-size: 14px; text-align: center; }
+/* on a wide screen the demo and its buttons sit side by side, so you can press things and watch the island at the same time */
+@media (min-width: 1001px) {
+  .demo { grid-template-columns: minmax(0, 1fr) 330px; grid-template-areas: "desk ctrls" "hint ctrls"; align-items: start; column-gap: 20px; }
+  .demo .desk { grid-area: desk; aspect-ratio: auto; height: clamp(440px, 68vh, 600px); }
+  .demo .ctrls { grid-area: ctrls; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .demo .box { padding: 16px 18px; border-radius: 18px; }
+  .demo > .hint { grid-area: hint; margin: 0; text-align: left; }
+}
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .island, .iw, .bub, .layer, .ly .tr, .ly .l, .win { transition-duration: .01s !important; } .playing .eq b { animation: none; transform: scaleY(.7); } }
 
@@ -322,7 +330,7 @@ footer a { color: var(--dim); }
 <section id="try" class="alt">
   <div class="wrap">
     <h2>Play with it.</h2>
-    <p class="sub">This is a small copy of Bloop that runs right here. Hover the island (or tap it) to open the player, then press things below to make stuff happen.</p>
+    <p class="sub">This is a small copy of Bloop that runs right here. Hover the island (or tap it) to open the player, then press the buttons to make stuff happen.</p>
     <div class="demo" id="demo">
       <div class="desk" id="desk" data-env="normal">
         <div class="wall"></div>
