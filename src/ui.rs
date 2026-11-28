@@ -675,7 +675,7 @@ impl Ui {
             self.lyr_blocks.push(LyrBlock { t: l.t, rows, top, h });
             top += h;
         }
-        self.lyr_total = top;
+        self.lyr_total = top + 12.0; // (and a little room under the last line)
         self.lyr_layout_w = aw;
     }
 
@@ -717,7 +717,8 @@ impl Ui {
             0.0
         };
         if self.t >= self.lyr_manual_until {
-            self.lyr_scroll.go(target, self.t, 0.6, 0.0, Curve(0.3, 0.9, 0.3, 1.0));
+            let dur = [0.6, 0.18, 0.7, 0.6][(self.cfg.lyrics_anim as usize).min(3)];
+            self.lyr_scroll.go(target, self.t, dur, 0.0, Curve(0.3, 0.9, 0.3, 1.0));
         }
         // the pill shows this line, and is as wide as the line needs
         let text = if idx >= 0 && !self.lyr_lines[idx as usize].text.is_empty() { self.lyr_lines[idx as usize].text.clone() } else { "♪".to_string() };
@@ -2062,7 +2063,7 @@ impl Ui {
     fn draw_lyrics_area(&mut self, x0: f32, y0: f32, h: f32, a: f32) {
         let s = self.scale;
         let (top, bottom) = (y0 + 72.0, y0 + h - 12.0);
-        let fade = (bottom - top) * 0.2;
+        let fade = (bottom - top) * 0.14;
         let win = Some((top * s, bottom * s, fade * s));
         const GRAY: [u8; 3] = [142, 142, 147];
         let mid = (top + bottom) / 2.0;
@@ -2077,27 +2078,70 @@ impl Ui {
             LyrStatus::Ready => {
                 let (px, lh) = if self.lyr_synced { (19.0, 23.75) } else { (15.0, 18.75) };
                 let scroll = if self.lyr_synced { self.lyr_scroll.x } else { 0.0 };
+                // the animation style the user chose: 0 smooth, 1 instant, 2 focus, 3 karaoke
+                let style = (self.cfg.lyrics_anim as usize).min(3);
+                let lit_dur = [0.3, 0.1, 0.4, 0.3][style];
+                let (dim_a, dim_s, lit_s) = [(0.34, 0.93, 1.0), (0.42, 1.0, 1.0), (0.22, 0.84, 1.06), (0.34, 0.93, 1.0)][style];
+                // the lit line's progress (for the karaoke wipe): how far the song is between this line and the next
+                let wipe = if style == 3 && self.lyr_synced && self.lyr_idx >= 0 {
+                    let i = self.lyr_idx as usize;
+                    let t0 = self.lyr_lines[i].t;
+                    let t1 = self.lyr_lines.get(i + 1).map(|l| l.t).unwrap_or(t0 + 4.0);
+                    let pos = self.position() as f32 + 0.15 + (self.cfg.lyrics_shift as f32 - 30.0) * 0.1;
+                    ((pos - t0) / (t1 - t0).max(0.3)).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
                 for (i, b) in self.lyr_blocks.iter().enumerate() {
                     let by = top + b.top - scroll;
                     if by + b.h < top - 4.0 || by > bottom + 4.0 {
                         continue;
                     }
-                    // the lit line fades in over 0.3 s, the one before it fades out
-                    let lit = smooth((self.t - self.lyr_since) / 0.3);
+                    // the lit line fades in, the one before it fades out
+                    let lit = smooth((self.t - self.lyr_since) / lit_dur);
                     let la = if !self.lyr_synced {
                         0.85
                     } else if i as i32 == self.lyr_idx {
-                        lerp(0.34, 1.0, lit)
+                        lerp(dim_a, 1.0, lit)
                     } else if i as i32 == self.lyr_prev {
-                        lerp(1.0, 0.34, lit)
+                        lerp(1.0, dim_a, lit)
                     } else {
-                        0.34
+                        dim_a
                     };
-                    // the other lines are 0.93 the size (scaled about their left-centre) and dimmer
-                    let sk = if !self.lyr_synced { 1.0 } else if i as i32 == self.lyr_idx { lerp(0.93, 1.0, lit) } else if i as i32 == self.lyr_prev { lerp(1.0, 0.93, lit) } else { 0.93 };
+                    // the other lines are smaller (scaled about their left-centre) and dimmer
+                    let sk = if !self.lyr_synced { 1.0 } else if i as i32 == self.lyr_idx { lerp(dim_s, lit_s, lit) } else if i as i32 == self.lyr_prev { lerp(lit_s, dim_s, lit) } else { dim_s };
+                    // karaoke: the words of the lit line turn bright one after the other
+                    let wipe_here = if style == 3 && i as i32 == self.lyr_idx { Some(wipe) } else { None };
+                    let total_w: f32 = if wipe_here.is_some() { b.rows.iter().map(|r| self.fonts.measure(Weight::Bold, r, px * sk * s)).sum() } else { 0.0 };
+                    let mut consumed = total_w * wipe_here.unwrap_or(1.0);
                     for (ri, row) in b.rows.iter().enumerate() {
                         let center = by + 5.0 + ri as f32 * lh + lh / 2.0;
-                        self.fonts.draw_faded(&mut self.pm, Weight::Bold, row, (x0 + 26.0) * s, (center + 0.31 * px * sk) * s, px * sk * s, WHITE, a * la, win);
+                        let (rx, ry, rpx) = ((x0 + 26.0) * s, (center + 0.31 * px * sk) * s, px * sk * s);
+                        if wipe_here.is_some() {
+                            // the part of this row already "sung" is bright, the rest dimmer
+                            let rw = self.fonts.measure(Weight::Bold, row, rpx);
+                            let mut cut = 0usize;
+                            let mut acc = 0.0f32;
+                            for (bi, ch) in row.char_indices() {
+                                let cw = self.fonts.measure(Weight::Bold, &row[bi..bi + ch.len_utf8()], rpx);
+                                if acc + cw * 0.5 > consumed {
+                                    break;
+                                }
+                                acc += cw;
+                                cut = bi + ch.len_utf8();
+                            }
+                            let (done, rest) = row.split_at(cut);
+                            if !done.is_empty() {
+                                self.fonts.draw_faded(&mut self.pm, Weight::Bold, done, rx, ry, rpx, WHITE, a, win);
+                            }
+                            if !rest.is_empty() {
+                                let dw = self.fonts.measure(Weight::Bold, done, rpx);
+                                self.fonts.draw_faded(&mut self.pm, Weight::Bold, rest, rx + dw, ry, rpx, WHITE, a * 0.42, win);
+                            }
+                            consumed = (consumed - rw).max(0.0);
+                        } else {
+                            self.fonts.draw_faded(&mut self.pm, Weight::Bold, row, rx, ry, rpx, WHITE, a * la, win);
+                        }
                     }
                 }
             }

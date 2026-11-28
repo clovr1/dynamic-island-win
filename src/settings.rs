@@ -21,6 +21,8 @@ pub struct Settings {
     pub lyrics_button: bool,
     /// lyrics timing: 0..=60, 30 = on time; each step is a tenth of a second (+ = the lines come later)
     pub lyrics_shift: u32,
+    /// how the lyrics move: 0 smooth, 1 instant, 2 focus, 3 karaoke
+    pub lyrics_anim: u8,
     pub maximized: MaxMode,
     pub fullscreen_hide: bool,
     /// size of the whole island, percent (80..=140)
@@ -60,6 +62,7 @@ impl Default for Settings {
             card_secs: 5,
             lyrics_button: true,
             lyrics_shift: 30,
+            lyrics_anim: 0,
             maximized: MaxMode::Notch,
             fullscreen_hide: true,
             scale_pct: 100,
@@ -126,6 +129,7 @@ impl Settings {
                 "player_volume" => s.player_volume = parse_bool(v).unwrap_or(s.player_volume),
                 "volume" => s.volume = v.trim().parse().unwrap_or(30),
                 "hide_windows_popups" => s.hide_windows_popups = parse_bool(v).unwrap_or(s.hide_windows_popups),
+                "lyrics_anim" => s.lyrics_anim = v.trim().parse().unwrap_or(0),
                 "lyrics_shift" => s.lyrics_shift = v.trim().parse().unwrap_or(30),
                 "device_pills" => s.device_pills = parse_bool(v).unwrap_or(s.device_pills),
                 "dnd_quiet" => s.dnd_quiet = parse_bool(v).unwrap_or(s.dnd_quiet),
@@ -144,6 +148,7 @@ impl Settings {
         self.theme = self.theme.min(5);
         self.volume = self.volume.min(100);
         self.lyrics_shift = self.lyrics_shift.min(60);
+        self.lyrics_anim = self.lyrics_anim.min(3);
         // an "owner/repo" is letters, digits, - _ . and one slash; anything else is dropped
         let ok = self.update_repo.split('/').count() == 2 && self.update_repo.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c));
         if !ok {
@@ -157,7 +162,7 @@ impl Settings {
         format!(
             "# Bloop settings (you can edit this file; the island reads it when it starts)\n\
              show_music_pill = {}\nhide_when_player_front = {}\nnotifications = {}\nuse_bubble = {}\ncard_secs = {}\nlyrics_button = {}\n\
-             maximized = {}\nfullscreen_hide = {}\nscale_pct = {}\nspeed_pct = {}\naccent_eq = {}\ncheck_updates = {}\nupdate_repo = {}\ntheme = {}\nstatus_pills = {}\ndnd_quiet = {}\nsounds = {}\nvolume = {}\nplayer_volume = {}\ndevice_pills = {}\nhide_windows_popups = {}\nlyrics_shift = {}\n",
+             maximized = {}\nfullscreen_hide = {}\nscale_pct = {}\nspeed_pct = {}\naccent_eq = {}\ncheck_updates = {}\nupdate_repo = {}\ntheme = {}\nstatus_pills = {}\ndnd_quiet = {}\nsounds = {}\nvolume = {}\nplayer_volume = {}\ndevice_pills = {}\nhide_windows_popups = {}\nlyrics_shift = {}\nlyrics_anim = {}\n",
             b(self.show_music_pill),
             b(self.hide_when_player_front),
             b(self.notifications),
@@ -183,7 +188,8 @@ impl Settings {
             b(self.player_volume),
             b(self.device_pills),
             b(self.hide_windows_popups),
-            self.lyrics_shift
+            self.lyrics_shift,
+            self.lyrics_anim
         )
     }
 }

@@ -76,6 +76,7 @@ pub enum Id {
     LyricsShift,
     PlayerVolume,
     Theme(u8),
+    LyrAnim(u8),
     Logo,
 }
 
@@ -101,6 +102,8 @@ enum Row {
     Radio(&'static str, &'static str, usize, [&'static str; 3]),
     /// the theme picker: chosen
     Themes(u8),
+    /// how the lyrics move: chosen
+    LyrAnims(u8),
     /// id, title, description, button text, style (0 normal / 1 primary / 2 danger)
     Button(Id, &'static str, String, String, u8),
 }
@@ -113,6 +116,7 @@ impl Row {
             Row::Slider(..) => 72.0,
             Row::Radio(..) => 68.0 + 3.0 * 42.0,
             Row::Themes(_) => 126.0,
+            Row::LyrAnims(_) => 126.0,
         }
     }
 }
@@ -535,6 +539,7 @@ impl Panel {
                 Row::Toggle(Id::PlayerFront, "Hide it while the music app is in front", "No need for the pill when the player's own window is open", s.hide_when_player_front),
                 Row::Toggle(Id::Lyrics, "Lyrics button", "Show a lyrics button in the player (lyrics come from lrclib.net)", s.lyrics_button),
                 Row::Slider(Id::LyricsShift, "Lyrics timing", "If the words come too early or too late, move them (+ = later)", s.lyrics_shift as f32, 0.0, 60.0, format!("{:+.1} s", (s.lyrics_shift as f32 - 30.0) * 0.1)),
+                Row::LyrAnims(s.lyrics_anim),
                 Row::Toggle(Id::PlayerVolume, "Volume slider in the player", "Change the volume of the music right from the open player", s.player_volume),
                 Row::Toggle(Id::Eq, "Equalizer in the cover's colour", "Otherwise the equalizer is white", s.accent_eq),
             ],
@@ -1273,6 +1278,13 @@ impl Panel {
                         out.push(Piece::Chip { id: Id::MaxOpt(i as u8), label: short[i].to_string(), desc: Self::short_desc(Id::MaxOpt(i as u8)).map(|d| d.to_string()).unwrap_or_else(|| opts[i].to_string()), on: *chosen == i, radio: true });
                     }
                 }
+                Row::LyrAnims(chosen) => {
+                    out.push(Piece::Heading("How the lyrics move".into()));
+                    let names = [("Smooth", "Glide, the lit line grows"), ("Instant", "Quick jumps, no frills"), ("Focus", "The lit line pops, the rest fades back"), ("Karaoke", "Words light up as they are sung")];
+                    for (i, (n, d)) in names.iter().enumerate() {
+                        out.push(Piece::Chip { id: Id::LyrAnim(i as u8), label: n.to_string(), desc: d.to_string(), on: *chosen as usize == i, radio: true });
+                    }
+                }
                 Row::Themes(chosen) => {
                     out.push(Piece::Heading("Theme".into()));
                     for (i, t) in THEMES.iter().enumerate() {
@@ -1540,6 +1552,12 @@ impl Panel {
                     return None;
                 }
                 s.theme = n.min(5);
+            }
+            Id::LyrAnim(n) => {
+                if s.lyrics_anim == n {
+                    return None;
+                }
+                s.lyrics_anim = n.min(3);
             }
             Id::MaxOpt(n) => {
                 s.maximized = [MaxMode::Notch, MaxMode::Hide, MaxMode::Normal][n as usize % 3];
