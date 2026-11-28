@@ -223,6 +223,7 @@ fn refresh(
         None => true,
     };
     if changed {
+        crate::win::log(&format!("media: {} - {} playing={} position {:.1} s of {:.0} s ({app})", info.artist, info.title, info.playing, info.pos, info.dur));
         *last_pub = Some((info.clone(), Instant::now()));
         if let Ok(mut g) = shared.info.lock() {
             *g = Some(info.clone());

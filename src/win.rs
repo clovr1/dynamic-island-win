@@ -259,6 +259,9 @@ impl App {
         let list: Vec<_> = self.shared.lyrics.lock().map(|mut g| std::mem::take(&mut *g)).unwrap_or_default();
         for m in list {
             self.ui.set_lyrics(&m.key, m.found);
+            if let Some(d) = self.ui.lyric_debug() {
+                log(&format!("lyrics arrived: {d}"));
+            }
         }
         self.present();
         self.kick();
@@ -281,6 +284,12 @@ impl App {
     /// Full screen / maximized window: asked about once a second (Windows has no cheaper way to tell us).
     fn check_env(&mut self) {
         self.ticks += 1;
+        // every 15 seconds while lyrics are on: where do they think the song is? (for finding out why a song is out of sync)
+        if self.ticks % 15 == 0 {
+            if let Some(d) = self.ui.lyric_debug() {
+                log(&d);
+            }
+        }
         if self.ticks % 60 == 0 && self.settings.hide_windows_popups {
             crate::popups::hide();
         }

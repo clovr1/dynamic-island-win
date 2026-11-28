@@ -1568,6 +1568,27 @@ impl Ui {
         (gx - self.face_look.0).abs() > 0.004 || (gy - self.face_look.1).abs() > 0.004 || self.face_vel.0.abs() > 0.02 || self.face_vel.1.abs() > 0.02 || (self.near_goal() - self.face_near).abs() > 0.01 || self.t_real - self.face_startle < 0.45
     }
 
+    /// For the log: where the lyrics think the song is, to find out why a song is out of sync.
+    pub fn lyric_debug(&self) -> Option<String> {
+        if !self.lyrics_on || self.lyr_status != LyrStatus::Ready || !self.lyr_synced || self.lyr_lines.is_empty() {
+            return None;
+        }
+        let pos = self.position() as f32;
+        let idx = lyrics::index_at(&self.lyr_lines, pos + 0.15 + LYRICS_SHIFT);
+        let (t, text) = if idx >= 0 { (self.lyr_lines[idx as usize].t, self.lyr_lines[idx as usize].text.clone()) } else { (0.0, String::new()) };
+        Some(format!(
+            "lyrics: song at {:.1} s of {:.0} s, lit line {} at {:.1} s \"{}\" ({} lines, first at {:.1} s, last at {:.1} s)",
+            pos,
+            self.media.dur,
+            idx,
+            t,
+            text.chars().take(40).collect::<String>(),
+            self.lyr_lines.len(),
+            self.lyr_lines.first().map(|l| l.t).unwrap_or(0.0),
+            self.lyr_lines.last().map(|l| l.t).unwrap_or(0.0)
+        ))
+    }
+
     /// Does the face want to know where the mouse is (the window asks Windows for it)?
     pub fn face_follows(&self) -> bool {
         self.face_visible()
