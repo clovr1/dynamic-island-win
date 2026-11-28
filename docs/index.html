@@ -140,7 +140,7 @@ footer a { color: var(--dim); }
 .desk { position: relative; aspect-ratio: 16 / 9.6; border-radius: 26px; overflow: hidden; background: #14131c; isolation: isolate; box-shadow: 0 30px 60px -34px rgba(0,0,0,.6); user-select: none; -webkit-user-select: none; }
 .wall { position: absolute; inset: 0; background:
   radial-gradient(60% 70% at 18% 8%, rgba(122,70,255,.55), transparent 62%),
-  radial-gradient(55% 60% at 88% 92%, rgba(255,92,40,.42), transparent 60%),
+  radial-gradient(55% 60% at 88% 92%, rgba(var(--acc, 255,92,40),.42), transparent 60%),
   radial-gradient(50% 60% at 80% 12%, rgba(40,190,200,.35), transparent 60%),
   linear-gradient(180deg, #1c1830, #0e0e16); }
 .win { position: absolute; left: 3%; right: 3%; top: 16%; bottom: 14%; border-radius: 12px; background: #1d1d24; box-shadow: 0 20px 50px -20px #000; opacity: .0; transform: scale(.96); transition: opacity .35s ease, transform .45s cubic-bezier(.3,1.3,.5,1), inset .45s ease; pointer-events: none; overflow: hidden; }
@@ -253,7 +253,7 @@ footer a { color: var(--dim); }
 .chip.ic { width: 42px; height: 42px; padding: 0; display: grid; place-items: center; border-radius: 50%; }
 .chip.ic svg { width: 20px; height: 20px; }
 .chip:hover { transform: translateY(-1px); } .chip:active { transform: scale(.96); }
-.chip[aria-pressed="true"] { background: var(--orange); border-color: var(--orange); color: #fff; }
+.chip[aria-pressed="true"] { background: var(--orange); border-color: var(--orange); color: var(--orange-ink); }
 .chip:focus-visible, .btn:focus-visible, summary:focus-visible { outline: 3px solid var(--orange); outline-offset: 2px; }
 .seg { display: inline-flex; background: var(--bg2); border: 1px solid var(--line); border-radius: 999px; padding: 3px; margin-bottom: 14px; }
 .seg button { appearance: none; border: 0; font: inherit; font-size: 14.5px; font-weight: 600; background: none; color: var(--dim); padding: 7px 16px; border-radius: 999px; cursor: pointer; }
@@ -290,7 +290,7 @@ h1 em { position: relative; display: inline-block; }
 .hscene { --sc: 1; position: relative; aspect-ratio: 1 / .78; border-radius: 28px; overflow: hidden; background: #14131c; box-shadow: 0 30px 60px -30px rgba(0,0,0,.45); }
 .hwall { position: absolute; inset: 0; background:
   radial-gradient(60% 70% at 18% 8%, rgba(122,70,255,.55), transparent 62%),
-  radial-gradient(55% 60% at 88% 92%, rgba(255,92,40,.42), transparent 60%),
+  radial-gradient(55% 60% at 88% 92%, rgba(var(--acc, 255,92,40),.42), transparent 60%),
   radial-gradient(50% 60% at 80% 12%, rgba(40,190,200,.35), transparent 60%),
   linear-gradient(180deg, #1c1830, #0e0e16); }
 .hisl { position: absolute; left: 50%; top: 16px; width: 236px; height: 40px; border-radius: 20px; background: #000; color: #fff; overflow: hidden; transform: translateX(-50%) scale(var(--sc)); transform-origin: top center; font-size: 14px; line-height: 1.3; }
@@ -335,7 +335,7 @@ ol.tut li { background: var(--card); border: 1px solid var(--line); border-radiu
 ol.tut li:hover { transform: translateY(-4px); box-shadow: 0 24px 34px -24px rgba(0,0,0,.45); }
 ol.tut img { width: 100%; height: auto; display: block; }
 ol.tut .tb { padding: 18px 22px 22px; display: grid; grid-template-columns: auto 1fr; column-gap: 12px; row-gap: 6px; align-items: center; }
-ol.tut .n { width: 34px; height: 34px; border-radius: 50%; background: var(--orange); color: #fff; display: grid; place-items: center; font-weight: 800; }
+ol.tut .n { width: 34px; height: 34px; border-radius: 50%; background: var(--orange); color: var(--orange-ink); display: grid; place-items: center; font-weight: 800; }
 ol.tut h3 { margin: 0; font-size: 20px; letter-spacing: -.01em; }
 ol.tut p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: 15.5px; }
 
@@ -412,6 +412,26 @@ ol.tut p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: 15.5px;
 @keyframes h-lit { 0% { transform: scale(.88); } 0.8%, 6% { transform: scale(1.07); } 7.2%, 100% { transform: scale(.88); } }
 @keyframes h-wipe { 0%, 0.8% { background-position: 100% 0; } 6%, 6.2% { background-position: 0 0; } 7.2%, 100% { background-position: 100% 0; } }
 
+
+/* themes */
+html.theming, html.theming * { transition: background-color .6s ease, color .6s ease, border-color .6s ease, fill .6s ease !important; }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.sw { appearance: none; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); padding: 0; cursor: pointer; position: relative; background: var(--c); transition: transform .2s cubic-bezier(.3,1.6,.5,1), border-color .2s; }
+.sw:hover { transform: scale(1.14); }
+.sw[aria-pressed="true"] { border-color: var(--ink); transform: scale(1.1); }
+.sw[aria-pressed="true"]::after { content: ""; position: absolute; inset: 5px; border-radius: 50%; border: 2px solid var(--ink); opacity: .55; }
+.sw:focus-visible { outline: 3px solid var(--orange); outline-offset: 2px; }
+
+/* what's new */
+ol.news { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; position: relative; }
+@media (max-width: 960px) { ol.news { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { ol.news { grid-template-columns: minmax(0, 1fr); } }
+ol.news li { background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 20px 22px 24px; position: relative; transition: transform .35s cubic-bezier(.3,1.5,.5,1), box-shadow .3s ease; }
+ol.news li:hover { transform: translateY(-5px); box-shadow: 0 22px 30px -22px rgba(0,0,0,.45); }
+ol.news .ver { display: inline-block; font-weight: 800; font-size: 14px; letter-spacing: .02em; color: var(--orange-ink); background: var(--orange); border-radius: 999px; padding: 4px 12px; margin-bottom: 14px; }
+ol.news li:first-child .ver::after { content: " · latest"; font-weight: 600; opacity: .85; }
+ol.news h3 { margin: 0 0 6px; font-size: 19px; letter-spacing: -.01em; }
+ol.news p { margin: 0; color: var(--dim); font-size: 15.5px; }
 </style>
 </head>
 <body>
@@ -422,6 +442,7 @@ ol.tut p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: 15.5px;
     <nav>
       <a href="#try">Try it</a>
       <a href="#features">Features</a>
+      <a href="#new">What's new</a>
       <a href="#install">Install</a>
       <a href="#faq">FAQ</a>
       <a class="btn small" href="https://github.com/clovr1/bloop/releases/latest/download/Bloop.exe" data-download>Download</a>
@@ -493,6 +514,19 @@ ol.tut p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: 15.5px;
   </div>
 </section>
 
+<section id="new">
+  <div class="wrap">
+    <h2>What's new.</h2>
+    <p class="sub">Bloop gets a little better every few weeks. Updates arrive by themselves.</p>
+    <ol class="news">
+      <li><span class="ver">0.23</span><h3>A new face</h3><p>A new app icon, a tidier Updates page, and lyrics that line up with the song out of the box.</p></li>
+      <li><span class="ver">0.22</span><h3>Karaoke lyrics</h3><p>The words light up as they are sung, with a soft glide. The line being sung grows. Sliders follow your drag instead of jumping.</p></li>
+      <li><span class="ver">0.21</span><h3>Floating devices</h3><p>A connected speaker or earbuds float in with a soft glow, like on the iPhone. Crisper lettering, and smarter full-screen detection.</p></li>
+      <li><span class="ver">0.20</span><h3>Bluetooth and quiet pop-ups</h3><p>A pill with the device's picture when it connects. Notifications go to the island only, not twice.</p></li>
+    </ol>
+  </div>
+</section>
+
 <section id="try" class="alt">
   <div class="wrap">
     <h2>Play with it.</h2>
@@ -557,6 +591,7 @@ ol.tut p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: 15.5px;
         </div>
         <div class="box">
           <h3>Make it yours</h3>
+          <div class="swatches" id="themes" role="group" aria-label="Colour theme of this page"></div>
           <div class="seg" role="group" aria-label="Lyrics style" id="styles"><button data-style="smooth" aria-pressed="true">Smooth</button><button data-style="karaoke" aria-pressed="false">Karaoke</button></div>
           <label class="rng"><span>Size</span><output id="sizev">100 %</output><input type="range" id="size" min="80" max="140" value="100"></label>
           <label class="rng"><span>Animation speed</span><output id="spdv">100 %</output><input type="range" id="spd" min="50" max="200" value="100"></label>
@@ -1070,6 +1105,35 @@ ol.tut p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: 15.5px;
       d._anim.oncancel = function () { d.style.overflow = ""; };
     });
   });
+})();
+</script>
+<script>
+// Pick a theme in the demo and the whole page takes its colours (the six themes of the app).
+(function () {
+  var THEMES = [{"name": "Bloop", "accent": "#ff5c28", "vars": null}, {"name": "Midnight", "accent": "#60cdff", "vars": {"--bg": "#272727", "--bg2": "#202020", "--card": "#313131", "--line": "#404040", "--ink": "#ffffff", "--dim": "#a6a6a6", "--orange": "#60cdff", "--orange-ink": "#000000", "--night": "#0b0b0e", "--acc": "96,205,255"}}, {"name": "Aurora", "accent": "#34e2a8", "vars": {"--bg": "#122225", "--bg2": "#0e1b1e", "--card": "#192f32", "--line": "#2a494d", "--ink": "#ebfffa", "--dim": "#8ab0ac", "--orange": "#34e2a8", "--orange-ink": "#001c14", "--night": "#0b0b0e", "--acc": "52,226,168"}}, {"name": "Sunset", "accent": "#ff8c52", "vars": {"--bg": "#291e20", "--bg2": "#21181a", "--card": "#37282a", "--line": "#523c3e", "--ink": "#fff4ee", "--dim": "#bc9c94", "--orange": "#ff8c52", "--orange-ink": "#280e00", "--night": "#0b0b0e", "--acc": "255,140,82"}}, {"name": "Grape", "accent": "#b68cff", "vars": {"--bg": "#201b2f", "--bg2": "#1a1626", "--card": "#2b243f", "--line": "#443b62", "--ink": "#f6f2ff", "--dim": "#a49ac4", "--orange": "#b68cff", "--orange-ink": "#180834", "--night": "#0b0b0e", "--acc": "182,140,255"}}, {"name": "Rose", "accent": "#ff70a6", "vars": {"--bg": "#2b1c26", "--bg2": "#22161e", "--card": "#3a2633", "--line": "#583c4e", "--ink": "#fff0f7", "--dim": "#be98ac", "--orange": "#ff70a6", "--orange-ink": "#30041a", "--night": "#0b0b0e", "--acc": "255,112,166"}}, {"name": "Daylight", "accent": "#0067e0", "vars": {"--bg": "#f6f7fa", "--bg2": "#eceef2", "--card": "#ffffff", "--line": "#dadee8", "--ink": "#181c26", "--dim": "#646c7c", "--orange": "#0067e0", "--orange-ink": "#ffffff", "--night": "#121214", "--acc": "0,103,224"}}];
+  var box = document.getElementById("themes");
+  if (!box) return;
+  var root = document.documentElement, current = 0;
+  function apply(i, animate) {
+    var t = THEMES[i];
+    if (animate) { root.classList.add("theming"); setTimeout(function () { root.classList.remove("theming"); }, 800); }
+    THEMES.forEach(function (x) { if (x.vars) Object.keys(x.vars).forEach(function (k) { root.style.removeProperty(k); }); });
+    if (t.vars) { Object.keys(t.vars).forEach(function (k) { root.style.setProperty(k, t.vars[k]); }); root.style.colorScheme = t.name === "Daylight" ? "light" : "dark"; }
+    else root.style.colorScheme = "";
+    var m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = t.vars ? t.vars["--bg"] : "#f4eee1";
+    current = i;
+    Array.prototype.forEach.call(box.children, function (b, j) { b.setAttribute("aria-pressed", String(j === i)); });
+    try { localStorage.setItem("bloop-theme", String(i)); } catch (e) {}
+  }
+  THEMES.forEach(function (t, i) {
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "sw"; b.style.setProperty("--c", t.accent); b.title = t.name; b.setAttribute("aria-label", t.name + " theme");
+    b.addEventListener("click", function () { apply(i, true); });
+    box.appendChild(b);
+  });
+  var saved = 0;
+  try { saved = parseInt(localStorage.getItem("bloop-theme") || "0", 10) || 0; } catch (e) {}
+  apply(Math.min(Math.max(saved, 0), THEMES.length - 1), false);
 })();
 </script>
 </body>
