@@ -375,7 +375,6 @@ ol.tut p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: 15.5px;
   .hpp { animation: h-tap 18s infinite; }
   .hln:not(.dim) { animation: h-lit 18s infinite both, h-wipe 18s infinite both linear; animation-delay: calc(18s * (0.40 + 0.055 * var(--k))); }
   .track { animation: tick 46s linear infinite; }
-  .ticker:hover .track { animation-play-state: paused; }
   .bubs i { animation: bubble 7s linear infinite; }
 
   /* things rise into view as you scroll */
@@ -427,7 +426,6 @@ ol.tut p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: 15.5px;
       <a href="#features">Features</a>
       <a href="#install">Install</a>
       <a href="#faq">FAQ</a>
-      <a href="https://github.com/clovr1/bloop">GitHub</a>
       <a class="btn small" href="https://github.com/clovr1/bloop/releases/latest/download/Bloop.exe" data-download>Download</a>
     </nav>
   </div>
@@ -445,7 +443,7 @@ ol.tut p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: 15.5px;
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg>
           Download for Windows
         </a>
-        <a class="btn ghost" href="https://github.com/clovr1/bloop">View on GitHub</a>
+        <a class="btn ghost" href="#try">Try it live</a>
       </div>
       <p class="fine"><span id="ver">Free</span> &middot; Windows 10 and 11, 64-bit &middot; one small file, no installer</p>
     </div>
@@ -606,7 +604,7 @@ ol.tut p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: 15.5px;
     <details><summary>My notifications do not show while Do Not Disturb is on.</summary><p>Windows itself holds them back, so Bloop never receives them. Add the apps you care about to the priority list in Windows (Settings, System, Notifications, Set priority notifications), or turn Do Not Disturb off. Bloop's own switch <b>Respect Do Not Disturb</b> (Settings, Notifications) decides whether what does arrive is shown or only listed.</p></details>
     <details><summary>Are the lyrics always right?</summary><p>They come from the free LRCLIB database, matched by song title, artist and length. Most popular songs are there, some are not. If the words come a little early or late for a particular song, that is how that file was timed.</p></details>
     <details><summary>Does Bloop collect my data?</summary><p>No accounts, no tracking, nothing is sent to a server of mine. Bloop makes two kinds of requests: it asks LRCLIB for the lyrics of the song you are playing (title, artist and length), and it asks GitHub whether a newer version exists. You can switch the update check off in Settings, Updates.</p></details>
-    <details><summary>How do updates work?</summary><p>Bloop looks at this page's GitHub releases a few seconds after start and then every six hours. When a newer version exists it downloads it and shows <b>Restart now</b>. You can also press <b>Check now</b> in Settings, Updates.</p></details>
+    <details><summary>How do updates work?</summary><p>Bloop looks for a newer version a few seconds after start and then every six hours. When a newer version exists it downloads it and shows <b>Restart now</b>. You can also press <b>Check now</b> in Settings, Updates.</p></details>
     <details><summary>The Windows pop-ups disappeared. Is that a bug?</summary><p>No. While Bloop runs it hides Windows' own notification banners so you do not see every message twice. When you quit Bloop from the tray, they come back. You can turn this off with <b>Only show them in Bloop</b> in Settings, Notifications.</p></details>
     <details><summary>How do I remove it?</summary><p>Open Settings from the tray icon, press <b>Quit Bloop</b> (General), and delete <code>Bloop.exe</code>. If you turned on Start with Windows, switch it off first in Settings, General. Settings live in <code>%APPDATA%\DynamicIsland</code> and can be deleted too.</p></details>
   </div>
@@ -621,7 +619,7 @@ ol.tut p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: 15.5px;
       <p>Free, small, and made with care. One file, no installer.</p>
       <div class="cta" style="justify-content:center">
         <a class="btn" href="https://github.com/clovr1/bloop/releases/latest/download/Bloop.exe" data-download>Download for Windows</a>
-        <a class="btn ghost" href="https://github.com/clovr1/bloop/releases">All versions</a>
+        <a class="btn ghost" href="#install">How to install</a>
       </div>
     </div>
   </div>
@@ -630,8 +628,8 @@ ol.tut p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: 15.5px;
 
 <footer>
   <div class="wrap">
-    <span>Bloop &middot; made by <a href="https://github.com/clovr1">clovr1</a></span>
-    <span><a href="https://github.com/clovr1/bloop">Source on GitHub</a> &middot; <a href="https://github.com/clovr1/bloop/issues">Report a problem</a> &middot; Lyrics by <a href="https://lrclib.net">LRCLIB</a></span>
+    <span>Bloop &middot; a dynamic island for Windows</span>
+    <span>Lyrics by <a href="https://lrclib.net">LRCLIB</a></span>
   </div>
 </footer>
 
