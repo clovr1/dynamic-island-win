@@ -397,7 +397,7 @@ impl Panel {
         self.status_n += 1;
         if self.status_n % 3 == 0 {
             use crate::deviceicons::Kind;
-            let devs = [("JBL Flip 6", Kind::Speaker), ("Xbox Wireless Controller", Kind::Controller), ("WH-1000XM5", Kind::Headphones), ("MX Keys", Kind::Keyboard), ("MX Master 3", Kind::Mouse)];
+            let devs = [("JBL Flip 6", Kind::Speaker), ("AirPods Pro", Kind::Earbuds), ("Xbox Wireless Controller", Kind::Controller), ("WH-1000XM5", Kind::Headphones), ("MX Keys", Kind::Keyboard), ("MX Master 3", Kind::Mouse)];
             let (name, kind) = devs[(self.status_n / 3 + t / 7) % devs.len()];
             self.preview.push_status(StatusData::Device { name: name.into(), kind, connected: true });
             return;

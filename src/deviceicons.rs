@@ -7,6 +7,8 @@ use tiny_skia::{FillRule, GradientStop, LinearGradient, Paint, PathBuilder, Pixm
 pub enum Kind {
     Speaker,
     Headphones,
+    /// small wireless earbuds (AirPods and the like)
+    Earbuds,
     Controller,
     Keyboard,
     Mouse,
@@ -19,6 +21,10 @@ pub enum Kind {
 pub fn classify(class: Option<u32>, name: &str) -> Kind {
     let n = name.to_lowercase();
     let has = |words: &[&str]| words.iter().any(|w| n.contains(w));
+    // earbuds are told by their name first (their "class" is just "headset")
+    if has(&["airpods", "buds", "earbuds", "pods", "wf-", "freebuds", "jabra elite", "powerbeats"]) {
+        return Kind::Earbuds;
+    }
     if let Some(c) = class.filter(|c| *c != 0) {
         let (major, minor) = ((c >> 8) & 0x1F, (c >> 2) & 0x3F);
         match major {
@@ -123,8 +129,54 @@ fn shade_disc(pm: &mut Pixmap, cx: f32, cy: f32, r: f32, top: [u8; 3], bottom: [
     shaded(pm, cx - r, cy - r, 2.0 * r, 2.0 * r, r, top, bottom, a);
 }
 
+/// The colour of the soft glow behind a device.
+fn glow_of(kind: Kind) -> [u8; 3] {
+    match kind {
+        Kind::Speaker => [90, 160, 255],
+        Kind::Headphones => [190, 140, 255],
+        Kind::Earbuds => [160, 200, 255],
+        Kind::Controller => [150, 120, 255],
+        Kind::Keyboard | Kind::Mouse => [120, 200, 255],
+        Kind::Phone => [120, 150, 255],
+        Kind::Watch => [255, 150, 110],
+        Kind::Other => [80, 150, 255],
+    }
+}
+
+/// The device, floating: a soft glow behind it, it rises and sinks a little with `lift` (0..1, from a slow wave), and its shadow on the
+/// ground gets smaller and fainter as it rises.
+pub fn draw_floating(pm: &mut Pixmap, kind: Kind, cx: f32, cy: f32, s: f32, a: f32, lift: f32) {
+    if a <= 0.01 {
+        return;
+    }
+    let g = glow_of(kind);
+    let mut paint = Paint::default();
+    let r = s * 0.78;
+    let (gx, gy) = (cx, cy - lift * s * 0.04);
+    paint.shader = tiny_skia::RadialGradient::new(
+        Point::from_xy(gx, gy),
+        Point::from_xy(gx, gy),
+        r,
+        vec![
+            GradientStop::new(0.0, tiny_skia::Color::from_rgba8(g[0], g[1], g[2], (70.0 * a * (0.7 + 0.3 * lift)) as u8)),
+            GradientStop::new(1.0, tiny_skia::Color::from_rgba8(g[0], g[1], g[2], 0)),
+        ],
+        SpreadMode::Pad,
+        Transform::identity(),
+    )
+    .unwrap_or(tiny_skia::Shader::SolidColor(tiny_skia::Color::TRANSPARENT));
+    if let Some(rect) = tiny_skia::Rect::from_xywh(gx - r, gy - r, 2.0 * r, 2.0 * r) {
+        pm.fill_rect(rect, &paint, Transform::identity(), None);
+    }
+    draw_lifted(pm, kind, cx, cy - lift * s * 0.07, s, a, lift);
+}
+
 /// Draw the device picture in a square of side `s` centred on (cx, cy). `a` is 0..1.
 pub fn draw(pm: &mut Pixmap, kind: Kind, cx: f32, cy: f32, s: f32, a: f32) {
+    draw_lifted(pm, kind, cx, cy, s, a, 0.0);
+}
+
+fn draw_lifted(pm: &mut Pixmap, kind: Kind, cx: f32, cy: f32, s: f32, a: f32, lift: f32) {
     if a <= 0.01 {
         return;
     }
@@ -133,10 +185,12 @@ pub fn draw(pm: &mut Pixmap, kind: Kind, cx: f32, cy: f32, s: f32, a: f32) {
     let p = |x: f32| x0 + x * u;
     let q = |y: f32| y0 + y * u;
     // the shadow on the "ground"
+    // (the picture is lifted by `lift`: the shadow stays on the ground, and becomes smaller and fainter)
+    let (sw, sa) = (72.0 * (1.0 - 0.22 * lift), 0.35 - 0.16 * lift);
     let mut sh = PathBuilder::new();
-    sh.push_oval(tiny_skia::Rect::from_xywh(p(14.0), q(86.0), 72.0 * u, 9.0 * u).unwrap());
+    sh.push_oval(tiny_skia::Rect::from_xywh(p(50.0 - sw / 2.0), q(86.0) + lift * 0.07 * s, sw * u, (9.0 - 2.0 * lift) * u).unwrap());
     if let Some(path) = sh.finish() {
-        pm.fill_path(&path, &solid([0, 0, 0], 0.35 * a), FillRule::Winding, Transform::identity(), None);
+        pm.fill_path(&path, &solid([0, 0, 0], sa * a), FillRule::Winding, Transform::identity(), None);
     }
     match kind {
         Kind::Speaker => {
@@ -162,6 +216,17 @@ pub fn draw(pm: &mut Pixmap, kind: Kind, cx: f32, cy: f32, s: f32, a: f32) {
             shaded(pm, p(64.0), q(50.0), 24.0 * u, 36.0 * u, 11.0 * u, [160, 164, 180], [44, 46, 58], a);
             shaded(pm, p(18.0), q(58.0), 12.0 * u, 20.0 * u, 6.0 * u, [40, 42, 52], [20, 21, 28], 0.9 * a);
             shaded(pm, p(70.0), q(58.0), 12.0 * u, 20.0 * u, 6.0 * u, [40, 42, 52], [20, 21, 28], 0.9 * a);
+        }
+        Kind::Earbuds => {
+            // two small earbuds, tilted a little, floating side by side
+            for (bx, tilt) in [(32.0f32, -1.0f32), (68.0, 1.0)] {
+                // the stem
+                shaded(pm, p(bx - 4.5 + tilt * 3.0), q(40.0), 9.0 * u, 42.0 * u, 4.5 * u, [255, 255, 255], [196, 200, 214], a);
+                // the head
+                shade_disc(pm, p(bx), q(34.0), 16.0 * u, [255, 255, 255], [190, 194, 210], a);
+                disc(pm, p(bx - tilt * 5.0), q(36.0), 5.0 * u, [150, 154, 170], 0.55 * a); // the speaker mesh
+                shaded(pm, p(bx - 9.0), q(22.0), 8.0 * u, 3.0 * u, 1.5 * u, [255, 255, 255], [255, 255, 255], 0.7 * a); // a glint
+            }
         }
         Kind::Controller => {
             shaded(pm, p(6.0), q(28.0), 88.0 * u, 44.0 * u, 20.0 * u, [150, 154, 170], [52, 54, 66], a);
@@ -247,6 +312,8 @@ mod tests {
         assert_eq!(classify(None, "Xbox Wireless Controller"), Kind::Controller);
         assert_eq!(classify(None, "JBL Flip 6"), Kind::Speaker);
         assert_eq!(classify(None, "WH-1000XM5"), Kind::Headphones);
+        assert_eq!(classify(None, "AirPods Pro"), Kind::Earbuds);
+        assert_eq!(classify(Some(4 << 8 | 1 << 2), "Galaxy Buds2"), Kind::Earbuds);
         assert_eq!(classify(Some(0), "Something"), Kind::Other);
     }
 }

@@ -16,6 +16,8 @@ pub struct Fonts {
     bold: fontdue::Font,
     index: HashMap<(u8, u32, char), usize>,
     store: Vec<(fontdue::Metrics, Vec<u8>)>,
+    /// glyphs moved a third or two thirds of a pixel to the right (so the letters keep an even rhythm instead of snapping to whole pixels)
+    shifted: HashMap<(usize, u8), Vec<u8>>,
 }
 
 impl Fonts {
@@ -27,6 +29,7 @@ impl Fonts {
             bold: load(include_bytes!("../assets/Inter-Bold.ttf")),
             index: HashMap::new(),
             store: Vec::new(),
+            shifted: HashMap::new(),
         }
     }
 
@@ -117,10 +120,40 @@ impl Fonts {
         }
         let (pw, ph) = (pm.width() as i32, pm.height() as i32);
         let mut cx = x;
+        // light text on a dark ground looks thinner than it is: its coverage is raised a little (the way browsers do it)
+        let light = rgb[0] as u32 + rgb[1] as u32 + rgb[2] as u32 > 384;
+        let boost = boost_table();
         for c in text.chars() {
             let gi = self.glyph(w, px, c);
-            let (m, bmp) = &self.store[gi];
-            let gx = (cx + m.xmin as f32).round() as i32;
+            let m = self.store[gi].0;
+            // where the glyph's left edge falls: a whole pixel plus a fraction, rounded to a third
+            let fx = cx + m.xmin as f32;
+            let mut ix = fx.floor() as i32;
+            let mut q = ((fx - fx.floor()) * 3.0).round() as u8;
+            if q >= 3 {
+                q = 0;
+                ix += 1;
+            }
+            let (bmp, bw): (&Vec<u8>, usize) = if q == 0 || m.width == 0 {
+                (&self.store[gi].1, m.width)
+            } else {
+                let src = &self.store[gi].1;
+                let f = q as f32 / 3.0;
+                let v = self.shifted.entry((gi, q)).or_insert_with(|| {
+                    let w1 = m.width + 1;
+                    let mut out = vec![0u8; w1 * m.height];
+                    for row in 0..m.height {
+                        for col in 0..w1 {
+                            let cur = if col < m.width { src[row * m.width + col] as f32 } else { 0.0 };
+                            let prev = if col > 0 { src[row * m.width + col - 1] as f32 } else { 0.0 };
+                            out[row * w1 + col] = (cur * (1.0 - f) + prev * f).round() as u8;
+                        }
+                    }
+                    out
+                });
+                (&*v, m.width + 1)
+            };
+            let gx = ix;
             let gy = (baseline - m.ymin as f32 - m.height as f32).round() as i32;
             let data = pm.data_mut();
             for row in 0..m.height as i32 {
@@ -139,14 +172,17 @@ impl Fonts {
                         t * t * (3.0 - 2.0 * t)
                     }
                 };
-                for col in 0..m.width as i32 {
+                for col in 0..bw as i32 {
                     let xx = gx + col;
                     if xx < 0 || xx >= pw {
                         continue;
                     }
-                    let cov = bmp[(row as usize) * m.width + col as usize];
+                    let mut cov = bmp[(row as usize) * bw + col as usize];
                     if cov == 0 {
                         continue;
+                    }
+                    if light {
+                        cov = boost[cov as usize];
                     }
                     let a = cov as f32 / 255.0 * alpha * row_a;
                     let i = ((y * pw + xx) * 4) as usize;
@@ -462,4 +498,16 @@ fn note_glyph(c: char, px: f32) -> Option<(fontdue::Metrics, Vec<u8>)> {
     m.ymin = (-px * 0.02) as i32;
     m.advance_width = w + px * 0.12;
     Some((m, cov))
+}
+
+/// Coverage -> coverage, a little stronger in the middle values (for light text).
+fn boost_table() -> &'static [u8; 256] {
+    static T: OnceLock<[u8; 256]> = OnceLock::new();
+    T.get_or_init(|| {
+        let mut t = [0u8; 256];
+        for (i, v) in t.iter_mut().enumerate() {
+            *v = (255.0 * (i as f32 / 255.0).powf(0.78)).round().min(255.0) as u8;
+        }
+        t
+    })
 }

@@ -1854,7 +1854,9 @@ impl Ui {
                 // like the iPhone's "connected" card: the device's picture, its name, and what happened
                 let x = pop.clamp(0.0, 1.0) - 1.0;
                 let grow = 0.55 + 0.45 * (1.0 + 2.70158 * x * x * x + 1.70158 * x * x);
-                crate::deviceicons::draw(&mut self.pm, *kind, (x0 + 40.0) * s, cy * s, 50.0 * grow * s, a * pop.clamp(0.0, 1.0).sqrt());
+                // it floats: it rises and sinks slowly, and its shadow and glow breathe with it
+                let lift = 0.5 + 0.5 * (self.t_real * 2.6).sin();
+                crate::deviceicons::draw_floating(&mut self.pm, *kind, (x0 + 40.0) * s, (cy - 1.0) * s, 54.0 * grow * s, a * pop.clamp(0.0, 1.0).sqrt(), lift);
                 let max_w = (w - 76.0 - 20.0).max(40.0);
                 let n = self.fonts.fit(Weight::Semibold, name, 15.5 * s, max_w * s);
                 self.fonts.draw(&mut self.pm, Weight::Semibold, &n, (x0 + 76.0) * s, (cy - 3.0) * s, 15.5 * s, WHITE, a);
