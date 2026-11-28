@@ -189,6 +189,8 @@ pub struct Panel {
     /// where the wheel wants the page to be (the page eases there)
     scroll_to: f32,
     stage_valid: bool,
+    /// the builder's extras (see developer.txt)
+    dev: bool,
     /// a slider drag: where the mouse went down and what the value was then
     drag_x0: f32,
     drag_v0: f32,
@@ -345,6 +347,7 @@ impl Panel {
             stage_force: true,
             scroll_to: 0.0,
             stage_valid: false,
+            dev: std::env::var_os("APPDATA").map(|a| std::path::PathBuf::from(a).join("DynamicIsland").join("developer.txt").exists()).unwrap_or(false),
             drag_x0: 0.0,
             drag_v0: 0.0,
             shown: Vec::new(),
@@ -576,11 +579,15 @@ impl Panel {
                 } else {
                     ("Check now".to_string(), 0)
                 };
-                vec![
-                    Row::Toggle(Id::CheckUpd, "Check for updates automatically", "A few seconds after start and then every 6 hours", s.check_updates),
-                    Row::Button(Id::InstallFile, "Install from a file", "Pick a newer Bloop.exe on this PC (to try a build before it is published)".into(), "Choose file...".into(), 0),
+                let mut rows = vec![
+                    Row::Toggle(Id::CheckUpd, "Check for updates automatically", "Every 6 hours, from GitHub", s.check_updates),
                     Row::Button(Id::CheckNow, "Bloop", format!("Version {} - {}", crate::version::VERSION, self.status), label, style),
-                ]
+                ];
+                // only for whoever builds Bloop: a file named developer.txt in %APPDATA%\DynamicIsland turns this on
+                if self.dev {
+                    rows.push(Row::Button(Id::InstallFile, "Install from a file", "Pick a newer Bloop.exe on this PC (to try a build before it is published)".into(), "Choose file...".into(), 0));
+                }
+                rows
             }
         }
     }
