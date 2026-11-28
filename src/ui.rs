@@ -1095,8 +1095,8 @@ impl Ui {
             Mode::Open if home => (380.0, self.home_h(), TOP, 36.0, 36.0),
             Mode::Open if hang => (self.open_w(), self.open_height() + 10.0, 0.0, 0.0, 34.0),
             Mode::Open => (400.0, self.open_height(), TOP, 42.0, 42.0),
-            Mode::Card if dev && hang => (330.0, 70.0, 0.0, 0.0, 30.0),
-            Mode::Card if dev => (330.0, 66.0, TOP, 33.0, 33.0),
+            Mode::Card if dev && hang => (300.0, 60.0, 0.0, 0.0, 26.0),
+            Mode::Card if dev => (300.0, 56.0, TOP, 28.0, 28.0),
             Mode::Card if status && hang => (272.0, 48.0, 0.0, 0.0, 22.0),
             Mode::Card if status => (272.0, 44.0, TOP, 22.0, 22.0),
             Mode::Card if hang => (360.0, 74.0 + self.card_extra(), 0.0, 0.0, 30.0),
@@ -1856,12 +1856,12 @@ impl Ui {
                 let grow = 0.55 + 0.45 * (1.0 + 2.70158 * x * x * x + 1.70158 * x * x);
                 // it floats: it rises and sinks slowly, and its shadow and glow breathe with it
                 let lift = 0.5 + 0.5 * (self.t_real * 2.6).sin();
-                crate::deviceicons::draw_floating(&mut self.pm, *kind, (x0 + 40.0) * s, (cy - 1.0) * s, 54.0 * grow * s, a * pop.clamp(0.0, 1.0).sqrt(), lift);
-                let max_w = (w - 76.0 - 20.0).max(40.0);
+                crate::deviceicons::draw_floating(&mut self.pm, *kind, (x0 + 31.0) * s, (cy - 0.5) * s, 36.0 * grow * s, a * pop.clamp(0.0, 1.0).sqrt(), lift);
+                let max_w = (w - 58.0 - 18.0).max(40.0);
                 let n = self.fonts.fit(Weight::Semibold, name, 15.5 * s, max_w * s);
-                self.fonts.draw(&mut self.pm, Weight::Semibold, &n, (x0 + 76.0) * s, (cy - 3.0) * s, 15.5 * s, WHITE, a);
+                self.fonts.draw(&mut self.pm, Weight::Semibold, &n, (x0 + 58.0) * s, (cy - 1.5) * s, 15.0 * s, WHITE, a);
                 let (txt, col) = if *connected { ("Connected", [48, 209, 88]) } else { ("Disconnected", GRAY) };
-                self.fonts.draw(&mut self.pm, Weight::Regular, txt, (x0 + 76.0) * s, (cy + 17.0) * s, 13.0 * s, col, a);
+                self.fonts.draw(&mut self.pm, Weight::Regular, txt, (x0 + 58.0) * s, (cy + 15.5) * s, 12.5 * s, col, a);
             }
             StatusData::Battery { label, level, charging, low } => {
                 let green = [48, 209, 88];

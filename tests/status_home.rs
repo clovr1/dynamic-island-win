@@ -162,7 +162,7 @@ fn a_bluetooth_device_pill() {
     run(&mut ui, 1.0);
     assert_eq!(ui.mode(), Mode::Card);
     let (_, _, w, h) = ui.rect_px();
-    assert!(w > 300.0 && w < 340.0 && h > 60.0 && h < 72.0, "a taller pill than the other status pills: {w} x {h}");
+    assert!(w > 285.0 && w < 315.0 && h > 50.0 && h < 64.0, "a taller pill than the other status pills: {w} x {h}");
     assert!(ui.take_sounds().iter().any(|s| matches!(s, Sound::Status(3))), "the Bluetooth \"on\" sound");
     // the same device reported twice (classic and low energy) is shown once: the second report changes nothing
     run(&mut ui, 5.0);
