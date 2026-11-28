@@ -168,6 +168,7 @@ impl Win {
             return;
         }
         self.panel.resize(w as u32, h as u32);
+        self.panel.invalidate();
         if let Some((bmp, bits)) = make_dib(self.dc, w, h) {
             unsafe {
                 SelectObject(self.dc, bmp);

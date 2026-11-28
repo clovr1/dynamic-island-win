@@ -777,6 +777,11 @@ impl Ui {
         }
     }
 
+    /// Is Windows' Do Not Disturb on, and does the island respect it?
+    pub fn dnd_state(&self) -> (bool, bool) {
+        (self.dnd, self.cfg.dnd_quiet)
+    }
+
     /// The date / time line of the home view.
     pub fn set_clock(&mut self, text: String) {
         self.clock = text;

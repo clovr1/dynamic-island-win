@@ -334,7 +334,8 @@ impl App {
     fn on_notifs(&mut self) {
         let list: Vec<_> = self.shared.notifs.lock().map(|mut g| std::mem::take(&mut *g)).unwrap_or_default();
         if !list.is_empty() {
-            log(&format!("notifications: showing {}", list.len()));
+            let (dnd, respect) = self.ui.dnd_state();
+            log(&format!("notifications: showing {} (Windows Do Not Disturb: {}, the island respects it: {})", list.len(), if dnd { "on" } else { "off" }, if respect { "yes - they are only listed" } else { "no" }));
         }
         for n in list {
             // Windows announces "Bluetooth turned on" etc. as toasts: those become the island's own status pill

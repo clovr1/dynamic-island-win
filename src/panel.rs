@@ -181,6 +181,7 @@ pub struct Panel {
     stage_force: bool,
     /// where the wheel wants the page to be (the page eases there)
     scroll_to: f32,
+    stage_valid: bool,
     /// the last picture that was shown (to send only what changed)
     shown: Vec<u8>,
     /// how "chosen" each dock button is (they swell and bounce)
@@ -333,6 +334,7 @@ impl Panel {
             burst: -1.0,
             stage_force: true,
             scroll_to: 0.0,
+            stage_valid: false,
             shown: Vec::new(),
             dock_k: [0.0; 6],
             bg_cache: None,
@@ -341,7 +343,24 @@ impl Panel {
         p.status = format!("Updates come from github.com/{}", p.s.update_repo);
         p.resize(size_px.0, size_px.1);
         p.start_preview();
+        p.warm_up();
         p
+    }
+
+    /// Draw every page once, unseen: the letters (glyphs) of every page get made now, not in the middle of the first slide-in.
+    fn warm_up(&mut self) {
+        let keep = self.page;
+        for i in 0..PAGES.len() as u8 {
+            self.page = i;
+            self.render();
+        }
+        self.page = keep;
+        self.hot.clear();
+        self.ripples.clear();
+        self.needs_full = true;
+        self.stage_valid = false;
+        self.stage_force = true;
+        self.shown.clear();
     }
 
     fn start_preview(&mut self) {
@@ -397,11 +416,18 @@ impl Panel {
     pub fn resize(&mut self, w_px: u32, h_px: u32) {
         let (w_px, h_px) = (w_px.max(2), h_px.max(2));
         self.needs_full = true;
+        self.shown.clear(); // (the window gets a new, empty picture: everything must be sent)
         if let Some(pm) = Pixmap::new(w_px, h_px) {
             self.pm = pm;
             self.w = w_px as f32 / self.scale;
             self.h = h_px as f32 / self.scale;
         }
+    }
+
+    /// The window lost its picture (it must be sent again, all of it).
+    pub fn invalidate(&mut self) {
+        self.needs_full = true;
+        self.shown.clear();
     }
 
     pub fn size_px(&self) -> (u32, u32) {
@@ -481,8 +507,9 @@ impl Panel {
 
     /// For the window's title bar: (dark?, colour as a Windows COLORREF 0x00BBGGRR).
     pub fn title_colors(&self) -> (bool, u32) {
-        let c = self.pal().win_bg;
-        (!self.pal().light, (c[2] as u32) << 16 | (c[1] as u32) << 8 | c[0] as u32)
+        let t = THEMES[(self.pal_theme as usize).min(THEMES.len() - 1)];
+        let c = t.win_bg;
+        (!t.light, (c[2] as u32) << 16 | (c[1] as u32) << 8 | c[0] as u32)
     }
 
     fn rows(&self) -> Vec<Row> {
@@ -673,7 +700,6 @@ impl Panel {
         self.draw_logo(&mut pm, false);
         rects.push((0, 0, ((SIDE * s).ceil() as i32).min(pw), ((84.0 * s).ceil() as i32).min(ph)));
         if self.stage_force {
-            self.stage_force = false;
             let (x, y, w, h) = self.stage;
             let bg = self.pal().page_bg;
             rr(&mut pm, s, x - 2.0, y - 2.0, w + 4.0, h + 4.0, 0.0, bg, 1.0);
@@ -683,13 +709,15 @@ impl Panel {
             rects.push((rx, ry, (((w + 4.0) * s).ceil() as i32).min(pw - rx).max(1), (((h + 4.0) * s).ceil() as i32).min(ph - ry).max(1)));
         }
         self.pm = pm;
-        // (what was sent now counts as shown)
+        // (what was sent now counts as shown - only the columns that were really sent)
         if self.shown.len() == self.pm.data().len() {
             let stride = (pw * 4) as usize;
-            for &(_, ry, _, rh) in &rects {
-                let (r0, r1) = (ry.max(0) as usize * stride, ((ry + rh).max(0) as usize * stride).min(self.shown.len()));
-                if r0 < r1 {
-                    self.shown[r0..r1].copy_from_slice(&self.pm.data()[r0..r1]);
+            for &(rx, ry, rw, rh) in &rects {
+                for row in ry.max(0)..(ry + rh).min(ph) {
+                    let (c0, c1) = (row as usize * stride + rx.max(0) as usize * 4, row as usize * stride + ((rx + rw).min(pw)).max(0) as usize * 4);
+                    if c0 < c1 && c1 <= self.shown.len() {
+                        self.shown[c0..c1].copy_from_slice(&self.pm.data()[c0..c1]);
+                    }
                 }
             }
         }
@@ -707,25 +735,35 @@ impl Panel {
         let pal = self.pal();
         let c = self.cat_color(self.page);
         pm.fill(Color::from_rgba8(pal.win_bg[0], pal.win_bg[1], pal.win_bg[2], 255));
-        let (w, h) = (pm.width() as f32, pm.height() as f32);
-        let glow = |pm: &mut Pixmap, cx: f32, cy: f32, r: f32, a: u8| {
-            let mut paint = Paint::default();
-            paint.shader = RadialGradient::new(
-                Point::from_xy(cx, cy),
-                Point::from_xy(cx, cy),
-                r,
-                vec![GradientStop::new(0.0, tiny_skia::Color::from_rgba8(c[0], c[1], c[2], a)), GradientStop::new(1.0, tiny_skia::Color::from_rgba8(c[0], c[1], c[2], 0))],
-                SpreadMode::Pad,
-                Transform::identity(),
-            )
-            .unwrap_or(tiny_skia::Shader::SolidColor(tiny_skia::Color::TRANSPARENT));
-            if let Some(r) = tiny_skia::Rect::from_xywh(0.0, 0.0, w, h) {
-                pm.fill_rect(r, &paint, Transform::identity(), None);
-            }
-        };
+        // two soft glows, worked out per pixel (a falling-off curve, no square roots), only where they reach
+        let (pw, ph) = (pm.width() as i32, pm.height() as i32);
         let k = if pal.light { 0.55 } else { 1.0 };
-        glow(pm, w * 0.12, h * 0.05, w * 0.55, (46.0 * k) as u8);
-        glow(pm, w * 0.95, h * 0.95, w * 0.5, (30.0 * k) as u8);
+        let (w, h) = (pw as f32, ph as f32);
+        let data = pm.data_mut();
+        for (cx, cy, r, a0) in [(w * 0.12, h * 0.05, w * 0.55, 46.0 * k), (w * 0.95, h * 0.95, w * 0.5, 30.0 * k)] {
+            let (y0, y1) = (((cy - r).max(0.0)) as i32, ((cy + r).min(h)) as i32);
+            let r2 = r * r;
+            for y in y0..y1 {
+                let dy = y as f32 + 0.5 - cy;
+                let rem = r2 - dy * dy;
+                if rem <= 0.0 {
+                    continue;
+                }
+                let half = rem.sqrt();
+                let (x0, x1) = (((cx - half).max(0.0)) as i32, ((cx + half).min(w)) as i32);
+                let row = (y * pw) as usize * 4;
+                for x in x0..x1 {
+                    let dx = x as f32 + 0.5 - cx;
+                    let t = 1.0 - (dx * dx + dy * dy) / r2;
+                    let a = a0 * t * t / 255.0; // 0..1
+                    let o = row + x as usize * 4;
+                    let inv = 1.0 - a;
+                    data[o] = (data[o] as f32 * inv + c[0] as f32 * a) as u8;
+                    data[o + 1] = (data[o + 1] as f32 * inv + c[1] as f32 * a) as u8;
+                    data[o + 2] = (data[o + 2] as f32 * inv + c[2] as f32 * a) as u8;
+                }
+            }
+        }
     }
 
     /// Copy rows `y0..y1` (physical pixels) of the background over what is there (the cache, or painted fresh while the theme fades).
@@ -1277,7 +1315,18 @@ impl Panel {
             self.stage_bg = Some(bg);
             self.stage_mask = mask;
             self.stage_pm = Pixmap::new(pw, ph);
+            self.stage_valid = false;
         }
+        if !self.stage_force && self.stage_valid {
+            // nothing changed in the live island: the picture from last time is simply put in place again
+            if let Some(st) = self.stage_pm.take() {
+                blit_over(pm, &st, (x * s).round() as i32, (y * s).round() as i32);
+                self.stage_pm = Some(st);
+                return;
+            }
+        }
+        self.stage_force = false;
+        self.stage_valid = true;
         let (Some(mut st), Some(bg)) = (self.stage_pm.take(), self.stage_bg.as_ref()) else { return };
         st.data_mut().copy_from_slice(bg.data());
         // a maximized window under the island

@@ -30,5 +30,40 @@ fn main() {
         p.tick(1.0 / 60.0);
         let _ = p.frame();
     }
+    // changing the page: the frames of the slide-in
+    let mut worst = 0.0f64;
+    let mut sum = 0.0f64;
+    let mut n = 0;
+    for page in [2u8, 4, 1, 3, 5, 0] {
+        p.set_page(page);
+        for _ in 0..40 {
+            p.tick(1.0 / 60.0);
+            let t = Instant::now();
+            let _ = p.frame();
+            let ms = t.elapsed().as_secs_f64() * 1000.0;
+            worst = worst.max(ms);
+            sum += ms;
+            n += 1;
+        }
+    }
+    println!("page change : average {:.2} ms, worst frame {:.2} ms", sum / n as f64, worst);
+    // changing the theme: the fade
+    p.set_page(4);
+    for _ in 0..60 {
+        p.tick(1.0 / 60.0);
+        let _ = p.frame();
+    }
+    let _ = p.press(island::panel::Id::Theme(3));
+    let (mut worst, mut sum, mut n) = (0.0f64, 0.0f64, 0);
+    for _ in 0..40 {
+        p.tick(1.0 / 60.0);
+        let t = Instant::now();
+        let _ = p.frame();
+        let ms = t.elapsed().as_secs_f64() * 1000.0;
+        worst = worst.max(ms);
+        sum += ms;
+        n += 1;
+    }
+    println!("theme change: average {:.2} ms, worst frame {:.2} ms", sum / n as f64, worst);
     println!("island only : {:.2} ms (tick + draw)", t.elapsed().as_secs_f64() * 1000.0 / 200.0);
 }
