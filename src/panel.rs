@@ -179,6 +179,10 @@ pub struct Panel {
     burst: f32,
     /// the live island needs to be drawn again
     stage_force: bool,
+    /// where the wheel wants the page to be (the page eases there)
+    scroll_to: f32,
+    /// the last picture that was shown (to send only what changed)
+    shown: Vec<u8>,
     /// how "chosen" each dock button is (they swell and bounce)
     dock_k: [f32; 6],
     bg_cache: Option<((u32, u32, u8, u8), Pixmap)>,
@@ -328,6 +332,8 @@ impl Panel {
             ripples: Vec::new(),
             burst: -1.0,
             stage_force: true,
+            scroll_to: 0.0,
+            shown: Vec::new(),
             dock_k: [0.0; 6],
             bg_cache: None,
         };
@@ -445,6 +451,7 @@ impl Panel {
         }
         self.page = page.min(PAGES.len() as u8 - 1);
         self.scroll = 0.0;
+        self.scroll_to = 0.0;
     }
 
     pub fn set_status(&mut self, text: &str, ready: bool) {
@@ -556,6 +563,14 @@ impl Panel {
         if self.page_anim < 0.8 {
             moving = true;
         }
+        // the wheel scrolls smoothly: the page eases towards where it was told to go
+        let ds = self.scroll_to - self.scroll;
+        if ds.abs() > 0.3 {
+            self.scroll += ds * (1.0 - (-dt * 16.0).exp());
+            moving = true;
+        } else {
+            self.scroll = self.scroll_to;
+        }
         if self.s.theme != self.pal_theme {
             self.pal_prev = Some(self.pal());
             self.pal_theme = self.s.theme;
@@ -593,7 +608,7 @@ impl Panel {
         if self.anim.iter().any(|a| (a.2 - a.1).abs() > 0.001) {
             return Some(16);
         }
-        if self.page_anim < 0.8 || self.pal_k < 1.0 || !self.ripples.is_empty() || self.burst >= 0.0 || (0..6).any(|i| (self.dock_k[i] - if self.page as usize == i { 1.0 } else { 0.0 }).abs() > 0.004) {
+        if (self.scroll_to - self.scroll).abs() > 0.3 || self.page_anim < 0.8 || self.pal_k < 1.0 || !self.ripples.is_empty() || self.burst >= 0.0 || (0..6).any(|i| (self.dock_k[i] - if self.page as usize == i { 1.0 } else { 0.0 }).abs() > 0.004) {
             return Some(16);
         }
         match self.preview.need() {
@@ -622,9 +637,33 @@ impl Panel {
     /// The next picture: the whole window when something changed, otherwise only the logo (always drifting) and, when it moves,
     /// the live island's box. Gives the boxes that changed.
     pub fn frame(&mut self) -> (&Pixmap, Vec<(i32, i32, i32, i32)>) {
-        if self.needs_full || self.stage.2 == 0.0 {
+        if self.needs_full || self.stage.2 == 0.0 || (self.scroll > 0.5 && (self.stage_force || self.t_anim > 0.0)) {
             let (w, h) = self.size_px();
-            return (self.render(), vec![(0, 0, w as i32, h as i32)]);
+            self.render();
+            // find the rows that really changed since the last picture, and give only those
+            let stride = (w * 4) as usize;
+            let data = self.pm.data();
+            if self.shown.len() != data.len() {
+                self.shown = data.to_vec();
+                return (&self.pm, vec![(0, 0, w as i32, h as i32)]);
+            }
+            let (mut first, mut last) = (None, 0usize);
+            for row in 0..h as usize {
+                let r = row * stride..(row + 1) * stride;
+                if data[r.clone()] != self.shown[r.clone()] {
+                    if first.is_none() {
+                        first = Some(row);
+                    }
+                    last = row;
+                }
+            }
+            return match first {
+                Some(f) => {
+                    self.shown[f * stride..(last + 1) * stride].copy_from_slice(&self.pm.data()[f * stride..(last + 1) * stride]);
+                    (&self.pm, vec![(0, f as i32, w as i32, (last - f + 1) as i32)])
+                }
+                None => (&self.pm, Vec::new()),
+            };
         }
         let s = self.scale;
         let mut pm = std::mem::replace(&mut self.pm, Pixmap::new(1, 1).unwrap());
@@ -644,6 +683,16 @@ impl Panel {
             rects.push((rx, ry, (((w + 4.0) * s).ceil() as i32).min(pw - rx).max(1), (((h + 4.0) * s).ceil() as i32).min(ph - ry).max(1)));
         }
         self.pm = pm;
+        // (what was sent now counts as shown)
+        if self.shown.len() == self.pm.data().len() {
+            let stride = (pw * 4) as usize;
+            for &(_, ry, _, rh) in &rects {
+                let (r0, r1) = (ry.max(0) as usize * stride, ((ry + rh).max(0) as usize * stride).min(self.shown.len()));
+                if r0 < r1 {
+                    self.shown[r0..r1].copy_from_slice(&self.pm.data()[r0..r1]);
+                }
+            }
+        }
         (&self.pm, rects)
     }
 
@@ -694,9 +743,11 @@ impl Panel {
         match (&self.bg_cache, fading) {
             (Some((_, bg)), false) => pm.data_mut()[a..b].copy_from_slice(&bg.data()[a..b]),
             _ => {
-                let mut bg = Pixmap::new(pw, ph).unwrap();
-                self.paint_bg(&mut bg);
-                pm.data_mut()[a..b].copy_from_slice(&bg.data()[a..b]);
+                // (while the colours fade: just the flat colour, the glows come back when it is done)
+                let c = self.pal().win_bg;
+                for px in pm.data_mut()[a..b].chunks_exact_mut(4) {
+                    px.copy_from_slice(&[c[0], c[1], c[2], 255]);
+                }
             }
         }
     }
@@ -876,9 +927,10 @@ impl Panel {
         let cw = (w - 64.0).min(760.0);
         let ml = (w - cw) / 2.0;
         let items_top = ITEMS_TOP;
+        let sy = -self.scroll;
         let pieces = self.pieces(&rows);
         let mut x = ml;
-        let mut y = items_top - self.scroll;
+        let mut y = items_top + sy;
         let mut line_h = 0.0f32;
         let gap = 12.0;
         for (i, pc) in pieces.iter().enumerate() {
@@ -886,13 +938,13 @@ impl Panel {
                 Piece::Heading(_) | Piece::Text(_) => (cw, 26.0, true),
                 Piece::Chip { .. } => (if cw >= 560.0 { (cw - 12.0) / 2.0 } else { cw }, 66.0, false),
                 Piece::Action { label, .. } => (self.fonts.measure(Weight::Semibold, label, 14.5 * s) / s + 44.0, 42.0, false),
-                Piece::Dial { .. } => (if cw >= 560.0 { (cw - 12.0) / 2.0 } else { cw }, 58.0, false),
+                Piece::Dial { .. } => (if cw >= 560.0 { (cw - 12.0) / 2.0 } else { cw }, 66.0, false),
                 Piece::Orb(..) => (78.0, 86.0, false),
             };
             // a new line when it does not fit, for headings, and when the kind of thing changes (switches / dials / orbs)
             let group = |pc: &Piece| match pc {
-                Piece::Chip { .. } | Piece::Action { .. } => 0,
-                Piece::Dial { .. } => 1,
+                Piece::Chip { .. } | Piece::Dial { .. } => 0,
+                Piece::Action { .. } => 1,
                 Piece::Orb(..) => 2,
                 _ => 3,
             };
@@ -997,6 +1049,7 @@ impl Panel {
         let total = y + line_h + self.scroll + 40.0;
         self.max_scroll = (total - h).max(0.0);
         self.scroll = self.scroll.min(self.max_scroll);
+        self.scroll_to = self.scroll_to.min(self.max_scroll);
 
         // ripples from presses
         for r in &self.ripples {
@@ -1012,8 +1065,60 @@ impl Panel {
             }
         }
 
-        // everything above the items stays where it is: cover what scrolled under it, then the bar, the live island, the dock
-        self.restore_bg(&mut pm, 0, ((items_top - 4.0) * s) as u32);
+        // the live island
+        let sw = (w - 64.0).min(760.0);
+        self.draw_stage(&mut pm, (w - sw) / 2.0, 62.0 + sy, sw, 232.0);
+        // the little buttons that make it show things
+        let mut bx = (w - sw) / 2.0;
+        for (id, label, on) in [(Id::DemoNotif, "Notification", false), (Id::DemoStatus, "Status pill", false), (Id::DemoMax, "Maximized", self.demo_max), (Id::DemoFs, "Full-screen", self.demo_fs)] {
+            let tw = self.fonts.measure(Weight::Semibold, label, 12.5 * s) / s;
+            let bw = tw + 26.0;
+            let hov = self.hover == Some(id);
+            let down = hov && self.down == Some(id);
+            let base = if on { acc } else { CARD };
+            let col = if down { mix(base, [0, 0, 0], 0.25) } else if hov { mix(base, [255, 255, 255], 0.14) } else { base };
+            rr(&mut pm, s, bx, 300.0 + sy, bw, 28.0, 14.0, col, 1.0);
+            self.text_mid(&mut pm, Weight::Semibold, label, bx + 13.0, 314.0 + sy, 12.5, if on { on_acc } else { TEXT });
+            self.hot.push(Hot { id, x: bx, y: 300.0 + sy, w: bw, h: 28.0 });
+            bx += bw + 8.0;
+        }
+
+        // the dock: one round button per page; the chosen one is big and in the page's colour
+        let n = PAGES.len() as f32;
+        let (dgap, dd) = (30.0, 58.0);
+        let total_w = n * dd + (n - 1.0) * dgap;
+        let dx0 = (w - total_w) / 2.0;
+        for (i, name) in PAGES.iter().enumerate() {
+            let id = Id::Nav(i as u8);
+            let col = self.cat_color(i as u8);
+            let k = self.dock_k[i];
+            let hov = self.hover == Some(id);
+            let d = dd * (1.0 + 0.2 * k + if hov { 0.06 } else { 0.0 });
+            let cx = dx0 + i as f32 * (dd + dgap) + dd / 2.0;
+            let cy = 388.0 - 6.0 * k + sy;
+            let (fill, fg) = (mix(CARD, col, k), mix(DIM, if col[0] as f32 * 0.299 + col[1] as f32 * 0.587 + col[2] as f32 * 0.114 > 150.0 { [20, 20, 26] } else { [255, 255, 255] }, k));
+            if k > 0.05 {
+                rr(&mut pm, s, cx - d / 2.0 - 5.0, cy - d / 2.0 - 5.0, d + 10.0, d + 10.0, d / 2.0 + 5.0, col, 0.18 * k);
+            }
+            rr(&mut pm, s, cx - d / 2.0, cy - d / 2.0, d, d, d / 2.0, fill, 1.0);
+            self.draw_glyph(&mut pm, i, cx, cy, d * 0.62, fg, fill);
+            let lw = self.fonts.measure(Weight::Semibold, name, 12.5 * s) / s;
+            self.text_mid(&mut pm, if k > 0.5 { Weight::Semibold } else { Weight::Regular }, name, cx - lw / 2.0, 436.0 + sy, 12.5, if k > 0.5 { TEXT } else { DIM });
+            self.hot.push(Hot { id, x: cx - dd / 2.0 - 6.0, y: 388.0 + sy - dd / 2.0 - 10.0, w: dd + 12.0, h: dd + 40.0 });
+        }
+        // what the thing under the mouse does
+        let hint = match self.hover {
+            Some(id) => self.hint_for(&rows, id),
+            None => String::new(),
+        };
+        let hint = if hint.is_empty() { SUBTITLES[self.page as usize].to_string() } else { hint };
+        let hint = self.fonts.fit(Weight::Regular, &hint, 13.5 * s, (cw - 20.0) * s);
+        let hw = self.fonts.measure(Weight::Regular, &hint, 13.5 * s) / s;
+        self.text_mid(&mut pm, Weight::Regular, &hint, w / 2.0 - hw / 2.0, 462.0 + sy, 13.5, DIM);
+        let _ = (h, EDGE);
+
+        // the bar at the top never scrolls: it covers what went under it
+        self.restore_bg(&mut pm, 0, (TOPBAR * s) as u32);
         self.draw_logo(&mut pm, true);
         // Save / Discard (only with unsaved changes)
         if self.dirty() {
@@ -1038,57 +1143,6 @@ impl Panel {
             rr(&mut pm, s, bx - mw - 20.0, 24.0, 8.0, 8.0, 4.0, acc, 0.5 + 0.5 * pulse);
         }
 
-        // the live island
-        let sw = (w - 64.0).min(760.0);
-        self.draw_stage(&mut pm, (w - sw) / 2.0, 62.0, sw, 232.0);
-        // the little buttons that make it show things
-        let mut bx = (w - sw) / 2.0;
-        for (id, label, on) in [(Id::DemoNotif, "Notification", false), (Id::DemoStatus, "Status pill", false), (Id::DemoMax, "Maximized", self.demo_max), (Id::DemoFs, "Full-screen", self.demo_fs)] {
-            let tw = self.fonts.measure(Weight::Semibold, label, 12.5 * s) / s;
-            let bw = tw + 26.0;
-            let hov = self.hover == Some(id);
-            let down = hov && self.down == Some(id);
-            let base = if on { acc } else { CARD };
-            let col = if down { mix(base, [0, 0, 0], 0.25) } else if hov { mix(base, [255, 255, 255], 0.14) } else { base };
-            rr(&mut pm, s, bx, 300.0, bw, 28.0, 14.0, col, 1.0);
-            self.text_mid(&mut pm, Weight::Semibold, label, bx + 13.0, 314.0, 12.5, if on { on_acc } else { TEXT });
-            self.hot.push(Hot { id, x: bx, y: 300.0, w: bw, h: 28.0 });
-            bx += bw + 8.0;
-        }
-
-        // the dock: one round button per page; the chosen one is big and in the page's colour
-        let n = PAGES.len() as f32;
-        let (dgap, dd) = (30.0, 58.0);
-        let total_w = n * dd + (n - 1.0) * dgap;
-        let dx0 = (w - total_w) / 2.0;
-        for (i, name) in PAGES.iter().enumerate() {
-            let id = Id::Nav(i as u8);
-            let col = self.cat_color(i as u8);
-            let k = self.dock_k[i];
-            let hov = self.hover == Some(id);
-            let d = dd * (1.0 + 0.2 * k + if hov { 0.06 } else { 0.0 });
-            let cx = dx0 + i as f32 * (dd + dgap) + dd / 2.0;
-            let cy = 388.0 - 6.0 * k;
-            let (fill, fg) = (mix(CARD, col, k), mix(DIM, if col[0] as f32 * 0.299 + col[1] as f32 * 0.587 + col[2] as f32 * 0.114 > 150.0 { [20, 20, 26] } else { [255, 255, 255] }, k));
-            if k > 0.05 {
-                rr(&mut pm, s, cx - d / 2.0 - 5.0, cy - d / 2.0 - 5.0, d + 10.0, d + 10.0, d / 2.0 + 5.0, col, 0.18 * k);
-            }
-            rr(&mut pm, s, cx - d / 2.0, cy - d / 2.0, d, d, d / 2.0, fill, 1.0);
-            self.draw_glyph(&mut pm, i, cx, cy, d * 0.62, fg, fill);
-            let lw = self.fonts.measure(Weight::Semibold, name, 12.5 * s) / s;
-            self.text_mid(&mut pm, if k > 0.5 { Weight::Semibold } else { Weight::Regular }, name, cx - lw / 2.0, 436.0, 12.5, if k > 0.5 { TEXT } else { DIM });
-            self.hot.push(Hot { id, x: cx - dd / 2.0 - 6.0, y: 388.0 - dd / 2.0 - 10.0, w: dd + 12.0, h: dd + 40.0 });
-        }
-        // what the thing under the mouse does
-        let hint = match self.hover {
-            Some(id) => self.hint_for(&rows, id),
-            None => String::new(),
-        };
-        let hint = if hint.is_empty() { SUBTITLES[self.page as usize].to_string() } else { hint };
-        let hint = self.fonts.fit(Weight::Regular, &hint, 13.5 * s, (cw - 20.0) * s);
-        let hw = self.fonts.measure(Weight::Regular, &hint, 13.5 * s) / s;
-        self.text_mid(&mut pm, Weight::Regular, &hint, w / 2.0 - hw / 2.0, 462.0, 13.5, DIM);
-        let _ = (h, EDGE);
 
         self.pm = pm;
         &self.pm
@@ -1523,6 +1577,6 @@ impl Panel {
             self.preview.wheel(notches);
             return;
         }
-        self.scroll = (self.scroll - notches * 56.0).clamp(0.0, self.max_scroll);
+        self.scroll_to = (self.scroll_to - notches * 70.0).clamp(0.0, self.max_scroll);
     }
 }
