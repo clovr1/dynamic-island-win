@@ -26,7 +26,7 @@ use windows::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
 use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_SINGLETHREADED};
 use windows::Win32::UI::HiDpi::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::{keybd_event, ReleaseCapture, SetCapture, TrackMouseEvent, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, TME_LEAVE, TRACKMOUSEEVENT, VK_MENU};
-use windows::Win32::UI::Shell::{SHQueryUserNotificationState, ShellExecuteW, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN, QUNS_APP};
+use windows::Win32::UI::Shell::{SHQueryUserNotificationState, ShellExecuteW, QUNS_RUNNING_D3D_FULL_SCREEN};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 /// "the window in front changed" / "the playing app changed" (WM_APP + 3)
@@ -263,9 +263,30 @@ impl App {
         self.refresh_volume();
         let mut env = self.ui.env();
         unsafe {
-            let mut fs = false;
+            // A full-screen app: Windows says "exclusive full screen" (a game), or the window in front covers the whole screen without a title bar
+            // (a video, F11 in the browser, a borderless game). Windows' other "busy" flags are not enough on their own: a live wallpaper or a
+            // presentation setting can set them while an ordinary desktop is showing, and then the island would vanish for no reason.
+            let fg0 = GetForegroundWindow();
+            let mut covers = false;
+            if !fg0.0.is_null() && fg0 != self.hwnd && IsWindowVisible(fg0).as_bool() && !IsIconic(fg0).as_bool() {
+                let mut buf = [0u16; 64];
+                let n = GetClassNameW(fg0, &mut buf) as usize;
+                let class = String::from_utf16_lossy(&buf[..n]);
+                if !matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd" | "XamlExplorerHostIslandWindow") {
+                    let mon = MonitorFromWindow(fg0, MONITOR_DEFAULTTONEAREST);
+                    let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+                    let mut r = RECT::default();
+                    if GetMonitorInfoW(mon, &mut mi).as_bool() && GetWindowRect(fg0, &mut r).is_ok() {
+                        let m = mi.rcMonitor;
+                        let style = GetWindowLongW(fg0, GWL_STYLE) as u32;
+                        let has_title = style & WS_CAPTION.0 == WS_CAPTION.0;
+                        covers = r.left <= m.left && r.top <= m.top && r.right >= m.right && r.bottom >= m.bottom && !has_title;
+                    }
+                }
+            }
+            let mut fs = covers;
             if let Ok(st) = SHQueryUserNotificationState() {
-                fs = st == QUNS_BUSY || st == QUNS_RUNNING_D3D_FULL_SCREEN || st == QUNS_PRESENTATION_MODE || st == QUNS_APP;
+                fs = fs || st == QUNS_RUNNING_D3D_FULL_SCREEN;
             }
             let mut mx = false;
             let fg = GetForegroundWindow();

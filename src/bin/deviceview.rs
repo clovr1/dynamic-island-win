@@ -1,5 +1,5 @@
 //! A sheet of the device pictures.
-use island::deviceicons::{draw, Kind};
+use island::deviceicons::Kind;
 use tiny_skia::{Color, Pixmap};
 
 fn main() {

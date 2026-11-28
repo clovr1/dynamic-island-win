@@ -5,7 +5,7 @@ use crate::gfx::{fill_rrect, Fonts, Weight};
 use crate::settings::{MaxMode, Settings};
 use crate::lyrics::{parse_lrc, Found};
 use crate::ui::{ArtData, Env, Hit, MediaInfo, Need, NotifData, Ui};
-use tiny_skia::{Color, GradientStop, LinearGradient, Mask, Paint, PathBuilder, Pixmap, Point, RadialGradient, SpreadMode, Transform};
+use tiny_skia::{Color, GradientStop, LinearGradient, Mask, Paint, PathBuilder, Pixmap, Point, SpreadMode, Transform};
 
 /// width of the list of pages (logical pixels)
 const SIDE: f32 = 224.0;
