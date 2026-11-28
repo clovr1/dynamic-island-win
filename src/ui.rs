@@ -665,7 +665,8 @@ impl Ui {
         let s = self.scale;
         let aw = self.open_w() - 52.0;
         let (px, lh) = if self.lyr_synced { (19.0, 23.75) } else { (15.0, 18.75) };
-        let mut top = 0.0;
+        // (a little room above the first line: at the start of the song it must be in plain view, not in the fade at the top edge)
+        let mut top = 12.0;
         self.lyr_blocks.clear();
         for l in &self.lyr_lines {
             let text = if l.text.is_empty() { "♪" } else { l.text.as_str() };
@@ -2061,7 +2062,7 @@ impl Ui {
     fn draw_lyrics_area(&mut self, x0: f32, y0: f32, h: f32, a: f32) {
         let s = self.scale;
         let (top, bottom) = (y0 + 72.0, y0 + h - 12.0);
-        let fade = (bottom - top) * 0.24;
+        let fade = (bottom - top) * 0.2;
         let win = Some((top * s, bottom * s, fade * s));
         const GRAY: [u8; 3] = [142, 142, 147];
         let mid = (top + bottom) / 2.0;
