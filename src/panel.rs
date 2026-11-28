@@ -194,7 +194,7 @@ struct Ripple {
 
 /// height of the bar at the top, and where the page's controls start
 const TOPBAR: f32 = 56.0;
-const ITEMS_TOP: f32 = 462.0;
+const ITEMS_TOP: f32 = 480.0;
 
 /// A thing on a page, as it is drawn: switches are chips, sliders are dials, themes are orbs.
 enum Piece {
@@ -279,7 +279,7 @@ fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
 
 impl Panel {
     /// The default (and smallest) size of the window's inside, logical pixels.
-    pub const DEFAULT_SIZE: (f32, f32) = (980.0, 790.0);
+    pub const DEFAULT_SIZE: (f32, f32) = (980.0, 810.0);
     pub const MIN_SIZE: (f32, f32) = (780.0, 640.0);
 
     pub fn new(scale: f32, s: Settings, autostart: bool, size_px: (u32, u32)) -> Panel {
@@ -886,7 +886,7 @@ impl Panel {
                 Piece::Heading(_) | Piece::Text(_) => (cw, 26.0, true),
                 Piece::Chip { label, .. } => ((self.fonts.measure(Weight::Semibold, label, 14.5 * s) / s + 56.0).min(cw), 42.0, false),
                 Piece::Action { label, .. } => (self.fonts.measure(Weight::Semibold, label, 14.5 * s) / s + 44.0, 42.0, false),
-                Piece::Dial { .. } => (124.0, 142.0, false),
+                Piece::Dial { .. } => (296.0, 58.0, false),
                 Piece::Orb(..) => (78.0, 86.0, false),
             };
             // a new line when it does not fit, for headings, and when the kind of thing changes (switches / dials / orbs)
@@ -946,26 +946,22 @@ impl Panel {
                     self.hot.push(Hot { id: *id, x, y: oy, w: iw, h: ih });
                 }
                 Piece::Dial { id, label, v, lo, hi, val, unit } => {
+                    // a box slider: the level is shown by how much of the box is filled; drag sideways
                     let frac = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
-                    let (dcx, dcy, r) = (x + iw / 2.0, oy + 52.0, 38.0);
                     let held = self.drag == Some(*id);
                     let hov = self.hover == Some(*id);
-                    // the dial: a ring, the part that is "full" in the page's colour, and a knob at the end
-                    rr(&mut pm, s, dcx - r - 6.0, dcy - r - 6.0, 2.0 * (r + 6.0), 2.0 * (r + 6.0), r + 6.0, if hov || held { CARD_HOVER } else { CARD }, 1.0);
-                    self.arc(&mut pm, dcx, dcy, r, 135.0, 405.0, 7.0, EDGE, 1.0);
-                    if frac > 0.002 {
-                        self.arc(&mut pm, dcx, dcy, r, 135.0, 135.0 + 270.0 * frac, 7.0, acc, 1.0);
-                    }
-                    let ang = (135.0 + 270.0 * frac).to_radians();
-                    let kr = if held { 8.5 } else { 6.5 };
-                    rr(&mut pm, s, dcx + ang.cos() * r - kr, dcy + ang.sin() * r - kr, kr * 2.0, kr * 2.0, kr, [255, 255, 255], 1.0);
-                    let vw = self.fonts.measure(Weight::Bold, val, 19.0 * s) / s;
-                    self.text_mid(&mut pm, Weight::Bold, val, dcx - vw / 2.0, dcy - 4.0, 19.0, TEXT);
-                    let uw = self.fonts.measure(Weight::Regular, unit, 11.5 * s) / s;
-                    self.text_mid(&mut pm, Weight::Regular, unit, dcx - uw / 2.0, dcy + 14.0, 11.5, DIM);
-                    let lw = self.fonts.measure(Weight::Regular, label, 13.0 * s) / s;
-                    self.text_mid(&mut pm, Weight::Regular, label, x + iw / 2.0 - lw.min(iw) / 2.0, oy + 118.0, 13.0, TEXT);
-                    self.hot.push(Hot { id: *id, x: dcx - r - 8.0, y: dcy - r - 8.0, w: 2.0 * (r + 8.0), h: 2.0 * (r + 8.0) });
+                    let (bx, by, bw, bh) = (x, oy, iw, ih);
+                    rr(&mut pm, s, bx - 1.0, by - 1.0, bw + 2.0, bh + 2.0, 13.0, if held { acc } else { EDGE }, 1.0);
+                    rr(&mut pm, s, bx, by, bw, bh, 12.0, if hov || held { CARD_HOVER } else { CARD }, 1.0);
+                    let fw = (bw * frac).max(24.0).min(bw);
+                    rr(&mut pm, s, bx, by, fw, bh, 12.0, mix(if hov || held { CARD_HOVER } else { CARD }, acc, 0.5), 1.0);
+                    // the handle at the end of the fill
+                    rr(&mut pm, s, bx + fw - 11.0, by + 11.0, 5.0, bh - 22.0, 2.5, acc, 1.0);
+                    self.text_mid(&mut pm, Weight::Semibold, label, bx + 16.0, by + bh / 2.0, 14.5, TEXT);
+                    let vt = if unit.is_empty() { val.clone() } else { format!("{val} {unit}") };
+                    let vw = self.fonts.measure(Weight::Bold, &vt, 16.0 * s) / s;
+                    self.text_mid(&mut pm, Weight::Bold, &vt, bx + bw - 16.0 - vw, by + bh / 2.0, 16.0, TEXT);
+                    self.hot.push(Hot { id: *id, x: bx, y: by, w: bw, h: bh });
                 }
                 Piece::Orb(n, name, chosen) => {
                     let t = &THEMES[(*n as usize).min(5)];
@@ -1060,7 +1056,7 @@ impl Panel {
             let hov = self.hover == Some(id);
             let d = dd * (1.0 + 0.2 * k + if hov { 0.06 } else { 0.0 });
             let cx = dx0 + i as f32 * (dd + dgap) + dd / 2.0;
-            let cy = 368.0 - 6.0 * k;
+            let cy = 388.0 - 6.0 * k;
             let (fill, fg) = (mix(CARD, col, k), mix(DIM, if col[0] as f32 * 0.299 + col[1] as f32 * 0.587 + col[2] as f32 * 0.114 > 150.0 { [20, 20, 26] } else { [255, 255, 255] }, k));
             if k > 0.05 {
                 rr(&mut pm, s, cx - d / 2.0 - 5.0, cy - d / 2.0 - 5.0, d + 10.0, d + 10.0, d / 2.0 + 5.0, col, 0.18 * k);
@@ -1068,8 +1064,8 @@ impl Panel {
             rr(&mut pm, s, cx - d / 2.0, cy - d / 2.0, d, d, d / 2.0, fill, 1.0);
             self.draw_glyph(&mut pm, i, cx, cy, d * 0.62, fg, fill);
             let lw = self.fonts.measure(Weight::Semibold, name, 12.5 * s) / s;
-            self.text_mid(&mut pm, if k > 0.5 { Weight::Semibold } else { Weight::Regular }, name, cx - lw / 2.0, 414.0, 12.5, if k > 0.5 { TEXT } else { DIM });
-            self.hot.push(Hot { id, x: cx - dd / 2.0 - 6.0, y: 368.0 - dd / 2.0 - 10.0, w: dd + 12.0, h: dd + 40.0 });
+            self.text_mid(&mut pm, if k > 0.5 { Weight::Semibold } else { Weight::Regular }, name, cx - lw / 2.0, 436.0, 12.5, if k > 0.5 { TEXT } else { DIM });
+            self.hot.push(Hot { id, x: cx - dd / 2.0 - 6.0, y: 388.0 - dd / 2.0 - 10.0, w: dd + 12.0, h: dd + 40.0 });
         }
         // what the thing under the mouse does
         let hint = match self.hover {
@@ -1079,7 +1075,7 @@ impl Panel {
         let hint = if hint.is_empty() { SUBTITLES[self.page as usize].to_string() } else { hint };
         let hint = self.fonts.fit(Weight::Regular, &hint, 13.5 * s, (cw - 20.0) * s);
         let hw = self.fonts.measure(Weight::Regular, &hint, 13.5 * s) / s;
-        self.text_mid(&mut pm, Weight::Regular, &hint, w / 2.0 - hw / 2.0, 440.0, 13.5, DIM);
+        self.text_mid(&mut pm, Weight::Regular, &hint, w / 2.0 - hw / 2.0, 462.0, 13.5, DIM);
         let _ = (h, EDGE);
 
         self.pm = pm;
@@ -1441,17 +1437,11 @@ impl Panel {
         Some(Act::Changed(s))
     }
 
-    fn set_slider(&mut self, id: Id, x: f32, y: f32) -> Option<Act> {
+    fn set_slider(&mut self, id: Id, x: f32, _y: f32) -> Option<Act> {
         let r = self.hot.iter().find(|r| r.id == id)?;
-        // the dial: the angle of the mouse around its centre (from 7 o'clock, clockwise, 270 degrees)
-        let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
-        let (dx, dy) = (x / self.scale - cx, y / self.scale - cy);
-        let theta = dy.atan2(dx).to_degrees().rem_euclid(360.0);
-        let mut a = (theta - 135.0).rem_euclid(360.0);
-        if a > 270.0 {
-            a = if a < 315.0 { 270.0 } else { 0.0 };
-        }
-        let frac = a / 270.0;
+        // the box: the mouse's place along it (a little margin at both ends so the ends can be reached)
+        let (sx, sw) = (r.x + 14.0, r.w - 28.0);
+        let frac = ((x / self.scale - sx) / sw).clamp(0.0, 1.0);
         let (lo, hi) = match id {
             Id::CardSecs => (2.0, 20.0),
             Id::Scale => (80.0, 140.0),

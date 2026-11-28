@@ -12,7 +12,7 @@ fn run(p: &mut Panel, secs: f32) {
 
 fn main() {
     let out = std::env::args().nth(1).unwrap_or_else(|| ".".into());
-    let size = (980, 790);
+    let size = (980, 810);
     for (i, name) in PAGES.iter().enumerate() {
         let mut p = Panel::new(1.0, Settings::default(), true, size);
         p.set_page(i as u8);
