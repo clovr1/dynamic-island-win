@@ -225,6 +225,8 @@ pub enum Mode {
 pub enum Need {
     /// nothing moves: stop the timer, draw nothing
     Rest,
+    /// the face is asleep: a look at the mouse about twice a second, to wake it when it moves
+    Doze,
     /// only the resting pill's face is alive: 10 frames a second are enough to catch its next blink
     Idle,
     /// the equalizer / progress bar / a notification countdown: ~30 frames a second
@@ -335,6 +337,10 @@ pub struct Ui {
     face_poke: f32,
     face_wake: f32,
     face_had_card: bool,
+    /// where the mouse is on the screen, relative to the island (logical px), and where the eyes look now (-1..1 each way)
+    look_target: Option<(f32, f32)>,
+    look_prev: (f32, f32),
+    face_look: (f32, f32),
     /// who uses the microphone / camera now, which dots to draw (kept while the dot fades out), and the dot's entrance
     privacy: (Option<String>, Option<String>),
     privacy_shown: (bool, bool),
@@ -537,6 +543,9 @@ impl Ui {
             face_poke: 0.0,
             face_wake: -100.0,
             face_had_card: false,
+            look_target: None,
+            look_prev: (0.0, 0.0),
+            face_look: (0.0, 0.0),
             privacy: (None, None),
             privacy_shown: (false, false),
             privacy_k: Tween::new(0.0),
@@ -1331,6 +1340,11 @@ impl Ui {
         if over_pill || has_card || !self.queue.is_empty() || self.media.active || self.open {
             self.face_poke = self.t_real;
         }
+        // the eyes follow the mouse
+        let (gx, gy) = self.look_goal();
+        let k = 1.0 - (-dt * 14.0).exp();
+        self.face_look.0 += (gx - self.face_look.0) * k;
+        self.face_look.1 += (gy - self.face_look.1) * k;
         // while a card is up and the mouse is on it, the player must not pop open when the card ends
         if self.card.is_some() && over_pill {
             self.open_block = true;
@@ -1440,7 +1454,7 @@ impl Ui {
             return if self.face_busy() {
                 Need::Slow
             } else if self.face_sleepy() >= 0.999 {
-                Need::Rest
+                Need::Doze
             } else {
                 Need::Idle
             };
@@ -1501,7 +1515,38 @@ impl Ui {
         let blink = (t + 0.12) % FACE_BLINK_EVERY;
         let glance = (t + 0.12) % FACE_GLANCE_EVERY;
         let sleepy = self.face_sleepy();
-        blink < if cyc % 3 == 2 { 0.7 } else { 0.34 } || glance < 0.34 || self.face_happy > 0.0 || (sleepy > 0.0 && sleepy < 1.0)
+        let (gx, gy) = self.look_goal();
+        let turning = (gx - self.face_look.0).abs() > 0.01 || (gy - self.face_look.1).abs() > 0.01;
+        // fast asleep: no blinks, no glances, only a smile or eyes still turning
+        if sleepy >= 0.999 {
+            return self.face_happy > 0.0 || turning;
+        }
+        blink < if cyc % 3 == 2 { 0.7 } else { 0.34 } || (self.look_target.is_none() && glance < 0.34) || self.face_happy > 0.0 || (sleepy > 0.0 && sleepy < 1.0) || turning
+    }
+
+    /// Where the eyes want to look: towards the mouse wherever it is on the screen (-1 left .. 1 right, -1 up .. 1 down).
+    fn look_goal(&self) -> (f32, f32) {
+        match self.look_target {
+            Some((dx, dy)) => ((dx / 260.0).clamp(-1.0, 1.0), (dy / 200.0).clamp(-1.0, 1.0)),
+            None => (0.0, 0.0),
+        }
+    }
+
+    /// Does the face want to know where the mouse is (the window asks Windows for it)?
+    pub fn face_follows(&self) -> bool {
+        self.face_visible()
+    }
+
+    /// The mouse's place on the screen, as an offset from the island's middle in logical px (None: not looking).
+    pub fn set_look(&mut self, p: Option<(f32, f32)>) {
+        if let Some((x, y)) = p {
+            // a moving mouse is somebody there: it wakes the face
+            if (x - self.look_prev.0).abs() + (y - self.look_prev.1).abs() > 8.0 {
+                self.face_poke = self.t_real;
+                self.look_prev = (x, y);
+            }
+        }
+        self.look_target = p;
     }
 
     /// How open the eyes are (0..1) and which way they look (-1 left .. 1 right).
@@ -1521,6 +1566,10 @@ impl Ui {
         let seg = (t / FACE_GLANCE_EVERY) as usize;
         let (prev, next) = (LOOK[(seg + LOOK.len() - 1) % LOOK.len()], LOOK[seg % LOOK.len()]);
         let e = smooth((t % FACE_GLANCE_EVERY) / 0.2);
+        // looking at the mouse wins over a glance of its own
+        if self.look_target.is_some() {
+            return (open, self.face_look.0 * (1.0 - sleepy));
+        }
         (open, lerp(prev, next, e) * (1.0 - sleepy))
     }
 
@@ -1536,8 +1585,9 @@ impl Ui {
         let (cx, cy) = (x0 + w / 2.0, y0 + h / 2.0 - 2.0 * happy);
         let (ew, eh) = (5.6, lerp(2.6, 12.5, open));
         for side in [-1.0f32, 1.0] {
-            let ex = cx + side * 9.5 + look * 3.4;
-            gfx::fill_rrect(&mut self.pm, (ex - ew / 2.0) * s, (cy - eh / 2.0) * s, ew * s, eh * s, [ew / 2.0 * s; 4], WHITE, a * (1.0 - happy));
+            let ex = cx + side * 9.5 + look * 4.8;
+            let ey = cy + self.face_look.1 * 2.2 * (1.0 - self.face_sleepy());
+            gfx::fill_rrect(&mut self.pm, (ex - ew / 2.0) * s, (ey - eh / 2.0) * s, ew * s, eh * s, [ew / 2.0 * s; 4], WHITE, a * (1.0 - happy));
         }
         if happy > 0.01 {
             let mut paint = tiny_skia::Paint::default();

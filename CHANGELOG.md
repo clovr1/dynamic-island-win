@@ -2,6 +2,10 @@
 
 All notable changes to Bloop. Newest first. Versions are the tags of the GitHub releases.
 
+## 0.25.1 - eyes that follow
+- The little face's eyes follow your mouse wherever it is on the screen (and look up or down too). A moving mouse also wakes the face
+  when it has nodded off. While it sleeps the island only looks at the mouse about twice a second.
+
 ## 0.25.0 - who is listening, what is arriving
 - **Microphone and camera dot:** a small dot beside the island (orange: microphone, green: camera) while a program uses them, and a pill
   with the program's name when one starts. It reads the list Windows keeps for its own privacy settings. Settings → Notifications.

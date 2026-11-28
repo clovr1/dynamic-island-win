@@ -179,6 +179,9 @@ impl App {
                 Need::Idle => {
                     SetTimer(self.hwnd, TIMER_ID, 100, None);
                 }
+                Need::Doze => {
+                    SetTimer(self.hwnd, TIMER_ID, 400, None);
+                }
                 Need::Rest | Need::Fast => {
                     let _ = KillTimer(self.hwnd, TIMER_ID);
                 }
@@ -220,6 +223,21 @@ impl App {
                     }
                 }
             }
+        }
+        // the face looks after the mouse, wherever it is on the screen
+        if self.ui.face_follows() {
+            let mut pt = POINT::default();
+            unsafe {
+                if GetCursorPos(&mut pt).is_ok() {
+                    let mut r = RECT::default();
+                    let _ = GetWindowRect(self.hwnd, &mut r);
+                    let s = self.ui.scale();
+                    let (cx, cy) = ((pt.x - r.left) as f32 / s, (pt.y - r.top) as f32 / s);
+                    self.ui.set_look(Some((cx - crate::ui::W / 2.0, cy - (crate::ui::TOP + 18.0))));
+                }
+            }
+        } else {
+            self.ui.set_look(None);
         }
         let need = self.ui.tick(dt);
         self.present();

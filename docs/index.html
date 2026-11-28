@@ -429,7 +429,8 @@ ol.news { list-style: none; padding: 0; margin: 0; display: grid; grid-template-
 ol.news li { background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 20px 22px 24px; position: relative; transition: transform .35s cubic-bezier(.3,1.5,.5,1), box-shadow .3s ease; }
 ol.news li:hover { transform: translateY(-5px); box-shadow: 0 22px 30px -22px rgba(0,0,0,.45); }
 ol.news .ver { display: inline-block; font-weight: 800; font-size: 14px; letter-spacing: .02em; color: var(--orange-ink); background: var(--orange); border-radius: 999px; padding: 4px 12px; margin-bottom: 14px; }
-ol.news li:first-child .ver::after { content: " · latest"; font-weight: 600; opacity: .85; }
+ol.news li.is-latest .ver::after { content: " · latest"; font-weight: 600; opacity: .85; }
+ol.news li.hide { display: none; }
 ol.news h3 { margin: 0 0 6px; font-size: 19px; letter-spacing: -.01em; }
 ol.news p { margin: 0; color: var(--dim); font-size: 15.5px; }
 @keyframes blink { 0%, 90%, 100% { transform: scaleY(1); } 94% { transform: scaleY(.15); } }
@@ -520,11 +521,13 @@ ol.news p { margin: 0; color: var(--dim); font-size: 15.5px; }
   <div class="wrap">
     <h2>What's new.</h2>
     <p class="sub">Bloop gets a little better every few weeks. Updates arrive by themselves.</p>
-    <ol class="news">
-      <li><span class="ver">0.25</span><h3>Who is listening, what is arriving</h3><p>A dot beside the island while a program uses your microphone or camera, and a pill with the file name and size while a download runs.</p></li>
-      <li><span class="ver">0.24</span><h3>A pill for copying, and a face</h3><p>A small "Copied" pill when you copy something (never what was copied). While nothing plays, the resting pill has a little face that blinks, looks around and smiles.</p></li>
-      <li><span class="ver">0.23</span><h3>A new face</h3><p>A new app icon, a tidier Updates page, and lyrics that line up with the song out of the box.</p></li>
-      <li><span class="ver">0.22</span><h3>Karaoke lyrics</h3><p>The words light up as they are sung, with a soft glide. The line being sung grows. Sliders follow your drag instead of jumping.</p></li>
+    <ol class="news" id="news">
+      <li data-ver="0.25"><span class="ver">0.25</span><h3>Who is listening, what is arriving</h3><p>A dot beside the island while a program uses your microphone or camera, and a pill with the file name and size while a download runs.</p></li>
+      <li data-ver="0.24"><span class="ver">0.24</span><h3>A pill for copying, and a face</h3><p>A small "Copied" pill when you copy something (never what was copied). While nothing plays, the resting pill has a little face whose eyes follow your mouse, and that blinks and smiles.</p></li>
+      <li data-ver="0.23"><span class="ver">0.23</span><h3>A new face</h3><p>A new app icon, a tidier Updates page, and lyrics that line up with the song out of the box.</p></li>
+      <li data-ver="0.22"><span class="ver">0.22</span><h3>Karaoke lyrics</h3><p>The words light up as they are sung, with a soft glide. The line being sung grows. Sliders follow your drag instead of jumping.</p></li>
+      <li data-ver="0.21"><span class="ver">0.21</span><h3>Floating devices</h3><p>A connected speaker or earbuds float in with a soft glow, like on the iPhone. Crisper lettering, and smarter full-screen detection.</p></li>
+      <li data-ver="0.20"><span class="ver">0.20</span><h3>Bluetooth and quiet pop-ups</h3><p>A pill with the device's picture when it connects. Notifications go to the island only, not twice.</p></li>
     </ol>
   </div>
 </section>
@@ -1060,6 +1063,7 @@ ol.news p { margin: 0; color: var(--dim); font-size: 15.5px; }
   fetch("https://api.github.com/repos/" + repo + "/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (j) {
+      showNews(j && j.tag_name ? j.tag_name : null);
       if (!j) return;
       var exe = (j.assets || []).filter(function (a) { return /\.exe$/i.test(a.name); })[0];
       var ver = document.getElementById("ver");
@@ -1069,7 +1073,23 @@ ol.news p { margin: 0; color: var(--dim); font-size: 15.5px; }
       }
       if (exe) document.querySelectorAll("[data-download]").forEach(function (a) { a.href = exe.browser_download_url; });
     })
-    .catch(function () {});
+    .catch(function () { showNews(null); });
+  // "What's new" lists the versions that have a release on GitHub (the newest four), and marks the newest. Without a reply it shows
+  // the first four and marks none.
+  function showNews(tag) {
+    var items = Array.prototype.slice.call(document.querySelectorAll("#news li"));
+    var num = function (v) { var m = /(\d+)\.(\d+)/.exec(v); return m ? [+m[1], +m[2]] : [0, 0]; };
+    var released = tag ? num(tag) : null;
+    var shown = 0;
+    items.forEach(function (li) {
+      var v = num(li.getAttribute("data-ver"));
+      var ok = !released || v[0] < released[0] || (v[0] === released[0] && v[1] <= released[1]);
+      li.classList.remove("is-latest", "hide");
+      if (!ok || shown >= 4) { li.classList.add("hide"); return; }
+      if (shown === 0 && released) li.classList.add("is-latest");
+      shown++;
+    });
+  }
 })();
 </script>
 <script>
