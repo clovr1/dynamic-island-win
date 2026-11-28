@@ -247,6 +247,9 @@ footer a { color: var(--dim); }
 .box h3 { margin: 0 0 12px; font-size: 14px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { appearance: none; font: inherit; font-size: 14.5px; font-weight: 600; color: var(--ink); background: var(--bg2); border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; cursor: pointer; transition: transform .12s ease, background .15s, color .15s; }
+.chips.icons { margin-top: 10px; }
+.chip.ic { width: 42px; height: 42px; padding: 0; display: grid; place-items: center; border-radius: 50%; }
+.chip.ic svg { width: 20px; height: 20px; }
 .chip:hover { transform: translateY(-1px); } .chip:active { transform: scale(.96); }
 .chip[aria-pressed="true"] { background: var(--orange); border-color: var(--orange); color: #fff; }
 .chip:focus-visible, .btn:focus-visible, summary:focus-visible { outline: 3px solid var(--orange); outline-offset: 2px; }
@@ -357,14 +360,14 @@ footer a { color: var(--dim); }
           <h3>Make something happen</h3>
           <div class="chips" id="ev">
             <button class="chip" data-ev="notif">Notification</button>
-            <button class="chip" data-ev="wifi" aria-pressed="true">Wi-Fi</button>
-            <button class="chip" data-ev="bt" aria-pressed="true">Bluetooth</button>
-            <button class="chip" data-ev="airplane" aria-pressed="false">Airplane mode</button>
-            <button class="chip" data-ev="dnd" aria-pressed="false">Do Not Disturb</button>
-            <button class="chip" data-ev="charge" aria-pressed="false">Charger</button>
-            <button class="chip" data-ev="speaker">Speaker connects</button>
-            <button class="chip" data-ev="headphones">Headphones connect</button>
-            <button class="chip" data-ev="controller">Controller connects</button>
+            <button class="chip" data-ev="device">Connect a device</button>
+          </div>
+          <div class="chips icons" id="sysbtns" role="group" aria-label="System switches">
+            <button class="chip ic" data-ev="wifi" data-ic="wifi" aria-pressed="true" aria-label="Wi-Fi" title="Wi-Fi"></button>
+            <button class="chip ic" data-ev="bt" data-ic="bt" aria-pressed="true" aria-label="Bluetooth" title="Bluetooth"></button>
+            <button class="chip ic" data-ev="airplane" data-ic="airplane" aria-pressed="false" aria-label="Airplane mode" title="Airplane mode"></button>
+            <button class="chip ic" data-ev="dnd" data-ic="dnd" aria-pressed="false" aria-label="Do Not Disturb" title="Do Not Disturb"></button>
+            <button class="chip ic" data-ev="charge" data-ic="bolt" aria-pressed="false" aria-label="Charger" title="Charger"></button>
           </div>
         </div>
         <div class="box">
@@ -733,7 +736,9 @@ footer a { color: var(--dim); }
   $("#edge").addEventListener("click", peekOn);
 
   /* ---- the buttons under the demo ---- */
-  $$("#ev .chip").forEach(function (b) {
+  $$("#sysbtns .chip").forEach(function (b) { b.innerHTML = ICONS[b.dataset.ic]; });
+  var devI = 0, DEVS = [["speaker", "JBL Flip 6"], ["headphones", "WH-1000XM5"], ["controller", "Wireless Controller"]];
+  $$("#ev .chip, #sysbtns .chip").forEach(function (b) {
     b.addEventListener("click", function () {
       var k = b.dataset.ev;
       if (S.env === "fs" && !S.peek) { /* in full screen nothing shows: the app stays quiet */ }
@@ -743,9 +748,7 @@ footer a { color: var(--dim); }
         (sys.charge ? snd.on : snd.off)();
         showTr({ kind: "status", s: { name: sys.charge ? "Charging" : "Unplugged", ic: sys.charge ? "bolt" : "bolt", c: sys.charge ? "#30d158" : "#8a8a92", batt: true } }, 2400);
       }
-      else if (k === "speaker") pushDevice("speaker", "JBL Flip 6");
-      else if (k === "headphones") pushDevice("headphones", "WH-1000XM5");
-      else if (k === "controller") pushDevice("controller", "Wireless Controller");
+      else if (k === "device") { var dv = DEVS[devI++ % DEVS.length]; pushDevice(dv[0], dv[1]); }
       else { var on = pushSys(k); b.setAttribute("aria-pressed", String(on)); }
     });
   });
