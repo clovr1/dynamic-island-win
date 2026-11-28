@@ -36,6 +36,10 @@ pub struct Settings {
     pub status_pills: bool,
     /// notifications stay quiet (only listed) while Windows' Do Not Disturb is on
     pub dnd_quiet: bool,
+    /// a pill with the device's picture when a Bluetooth device connects
+    pub device_pills: bool,
+    /// while Bloop runs, Windows' own notification banners are off (the island shows them instead)
+    pub hide_windows_popups: bool,
     /// soft sound effects (opening, closing, notifications)
     pub sounds: bool,
     /// 0..=100
@@ -63,6 +67,8 @@ impl Default for Settings {
             theme: 0,
             status_pills: true,
             dnd_quiet: true,
+            device_pills: true,
+            hide_windows_popups: true,
             sounds: true,
             volume: 30,
             player_volume: true,
@@ -116,6 +122,8 @@ impl Settings {
                 "sounds" => s.sounds = parse_bool(v).unwrap_or(s.sounds),
                 "player_volume" => s.player_volume = parse_bool(v).unwrap_or(s.player_volume),
                 "volume" => s.volume = v.trim().parse().unwrap_or(30),
+                "hide_windows_popups" => s.hide_windows_popups = parse_bool(v).unwrap_or(s.hide_windows_popups),
+                "device_pills" => s.device_pills = parse_bool(v).unwrap_or(s.device_pills),
                 "dnd_quiet" => s.dnd_quiet = parse_bool(v).unwrap_or(s.dnd_quiet),
                 "theme" => s.theme = v.trim().parse().unwrap_or(0),
                 _ => {}
@@ -144,7 +152,7 @@ impl Settings {
         format!(
             "# Bloop settings (you can edit this file; the island reads it when it starts)\n\
              show_music_pill = {}\nhide_when_player_front = {}\nnotifications = {}\nuse_bubble = {}\ncard_secs = {}\nlyrics_button = {}\n\
-             maximized = {}\nfullscreen_hide = {}\nscale_pct = {}\nspeed_pct = {}\naccent_eq = {}\ncheck_updates = {}\nupdate_repo = {}\ntheme = {}\nstatus_pills = {}\ndnd_quiet = {}\nsounds = {}\nvolume = {}\nplayer_volume = {}\n",
+             maximized = {}\nfullscreen_hide = {}\nscale_pct = {}\nspeed_pct = {}\naccent_eq = {}\ncheck_updates = {}\nupdate_repo = {}\ntheme = {}\nstatus_pills = {}\ndnd_quiet = {}\nsounds = {}\nvolume = {}\nplayer_volume = {}\ndevice_pills = {}\nhide_windows_popups = {}\n",
             b(self.show_music_pill),
             b(self.hide_when_player_front),
             b(self.notifications),
@@ -167,7 +175,9 @@ impl Settings {
             b(self.dnd_quiet),
             b(self.sounds),
             self.volume,
-            b(self.player_volume)
+            b(self.player_volume),
+            b(self.device_pills),
+            b(self.hide_windows_popups)
         )
     }
 }

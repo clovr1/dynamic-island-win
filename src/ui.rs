@@ -84,6 +84,13 @@ pub fn status_sound_code(st: &StatusData) -> u8 {
             let i = ["wifi", "bluetooth", "hotspot", "cellular", "airplane", "dnd", "nightlight", "energy"].iter().position(|k| *k == key).unwrap_or(0) as u8;
             i * 2 + *on as u8
         }
+        StatusData::Device { connected, .. } => {
+            if *connected {
+                3
+            } else {
+                2
+            }
+        }
         StatusData::Battery { low: true, .. } => 18,
         StatusData::Battery { charging: true, .. } => 16,
         StatusData::Battery { .. } => 17,
@@ -97,6 +104,8 @@ pub enum StatusData {
     Sys { key: String, on: bool },
     /// battery: "Charging" / "Unplugged" / "Low Battery"
     Battery { label: String, level: i32, charging: bool, low: bool },
+    /// a Bluetooth device connected / disconnected
+    Device { name: String, kind: crate::deviceicons::Kind, connected: bool },
 }
 
 #[derive(Clone)]
@@ -905,6 +914,18 @@ impl Ui {
         if !self.cfg.status_pills {
             return;
         }
+        if let StatusData::Device { name, connected, .. } = &st {
+            if !self.cfg.device_pills {
+                return;
+            }
+            // the same device reported twice (classic and low-energy): shown once
+            let key = format!("dev:{name}");
+            self.sys_last.retain(|(_, _, at)| at.elapsed().as_secs() < 10);
+            if self.sys_last.iter().any(|(k, o, at)| *k == key && o == connected && at.elapsed().as_secs_f32() < 5.0) {
+                return;
+            }
+            self.sys_last.push((key, *connected, Instant::now()));
+        }
         if let StatusData::Sys { key, on } = &st {
             // the same change reported twice (our own detector and Windows' toast)
             self.sys_last.retain(|(_, _, at)| at.elapsed().as_secs() < 10);
@@ -1063,6 +1084,7 @@ impl Ui {
         let hang = self.attached();
         let home = !self.media.active;
         let status = self.card.as_ref().map(|c| c.n.status.is_some()).unwrap_or(false);
+        let dev = matches!(self.card.as_ref().and_then(|c| c.n.status.as_ref()), Some(StatusData::Device { .. }));
         let (w, h, y, rt, rb) = match self.mode() {
             Mode::Idle => (120.0, 36.0, TOP, 18.0, 18.0),
             Mode::Play if notch => (if self.lyric_line_active() && !self.line_text.is_empty() { self.notch_line_w } else { NOTCH_W }, 28.0, 0.0, 0.0, 17.0),
@@ -1073,6 +1095,8 @@ impl Ui {
             Mode::Open if home => (380.0, self.home_h(), TOP, 36.0, 36.0),
             Mode::Open if hang => (self.open_w(), self.open_height() + 10.0, 0.0, 0.0, 34.0),
             Mode::Open => (400.0, self.open_height(), TOP, 42.0, 42.0),
+            Mode::Card if dev && hang => (330.0, 70.0, 0.0, 0.0, 30.0),
+            Mode::Card if dev => (330.0, 66.0, TOP, 33.0, 33.0),
             Mode::Card if status && hang => (272.0, 48.0, 0.0, 0.0, 22.0),
             Mode::Card if status => (272.0, 44.0, TOP, 22.0, 22.0),
             Mode::Card if hang => (360.0, 74.0 + self.card_extra(), 0.0, 0.0, 30.0),
@@ -1639,7 +1663,7 @@ impl Ui {
             self.draw_bubble();
         }
 
-        if let Some(StatusData::Sys { .. } | StatusData::Battery { .. }) = self.card.as_ref().and_then(|c| c.n.status.clone()) {
+        if self.card.as_ref().map(|c| c.n.status.is_some()).unwrap_or(false) {
             let st = self.card.as_ref().and_then(|c| c.n.status.clone()).unwrap();
             let a = smooth((w - 200.0) / 60.0);
             self.draw_status(x0, y0, w, h, a, &st);
@@ -1825,6 +1849,17 @@ impl Ui {
                 let t = if *on { "On" } else { "Off" };
                 let tw = self.fonts.measure(Weight::Semibold, t, 14.5 * s);
                 self.fonts.draw(&mut self.pm, Weight::Semibold, t, (x0 + w - 22.0) * s - tw, (cy + 5.2) * s, 14.5 * s, if *on { color } else { GRAY }, a);
+            }
+            StatusData::Device { name, kind, connected } => {
+                // like the iPhone's "connected" card: the device's picture, its name, and what happened
+                let x = pop.clamp(0.0, 1.0) - 1.0;
+                let grow = 0.55 + 0.45 * (1.0 + 2.70158 * x * x * x + 1.70158 * x * x);
+                crate::deviceicons::draw(&mut self.pm, *kind, (x0 + 40.0) * s, cy * s, 50.0 * grow * s, a * pop.clamp(0.0, 1.0).sqrt());
+                let max_w = (w - 76.0 - 20.0).max(40.0);
+                let n = self.fonts.fit(Weight::Semibold, name, 15.5 * s, max_w * s);
+                self.fonts.draw(&mut self.pm, Weight::Semibold, &n, (x0 + 76.0) * s, (cy - 3.0) * s, 15.5 * s, WHITE, a);
+                let (txt, col) = if *connected { ("Connected", [48, 209, 88]) } else { ("Disconnected", GRAY) };
+                self.fonts.draw(&mut self.pm, Weight::Regular, txt, (x0 + 76.0) * s, (cy + 17.0) * s, 13.0 * s, col, a);
             }
             StatusData::Battery { label, level, charging, low } => {
                 let green = [48, 209, 88];

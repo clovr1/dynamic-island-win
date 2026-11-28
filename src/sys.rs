@@ -25,10 +25,98 @@ pub enum SysMsg {
     Battery { label: String, level: i32, charging: bool, low: bool },
     /// Do Not Disturb; `first`: the very first reading (only remembered, no pill)
     Dnd { on: bool, first: bool },
+    /// a Bluetooth device connected / disconnected
+    Device { name: String, kind: crate::deviceicons::Kind, connected: bool },
 }
 
 pub fn start(hwnd: isize, shared: Arc<Shared>) {
+    let (h2, s2) = (hwnd, shared.clone());
     let _ = std::thread::Builder::new().name("system".into()).spawn(move || run(hwnd, shared));
+    let _ = std::thread::Builder::new().name("bluetooth".into()).spawn(move || {
+        if let Err(e) = watch_devices(h2, s2) {
+            crate::win::log(&format!("bluetooth devices: could not watch ({e})"));
+        }
+    });
+}
+
+/// Tell the window that a Bluetooth device connected / disconnected.
+fn send_device(hwnd: isize, shared: &Shared, name: String, kind: crate::deviceicons::Kind, connected: bool) {
+    crate::win::log(&format!("bluetooth: {name} {} ({kind:?})", if connected { "connected" } else { "disconnected" }));
+    if let Ok(mut g) = shared.sys.lock() {
+        g.push(SysMsg::Device { name, kind, connected });
+    }
+    unsafe {
+        let _ = PostMessageW(HWND(hwnd as *mut _), WM_SYS, WPARAM(0), LPARAM(0));
+    }
+}
+
+/// Watch the Bluetooth devices that are connected: one that appears in the list has just connected, one that leaves it has disconnected.
+/// (What is connected when the program starts is only remembered.)
+fn watch_devices(hwnd: isize, shared: Arc<Shared>) -> windows::core::Result<()> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex;
+    use windows::Devices::Bluetooth::{BluetoothConnectionStatus, BluetoothDevice, BluetoothLEDevice};
+    use windows::Devices::Enumeration::{DeviceInformation, DeviceInformationUpdate, DeviceWatcher};
+    use windows::Foundation::TypedEventHandler;
+    unsafe {
+        let _ = RoInitialize(RO_INIT_MULTITHREADED);
+    }
+    let selectors = [
+        BluetoothDevice::GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus::Connected)?,
+        BluetoothLEDevice::GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus::Connected)?,
+    ];
+    let mut watchers: Vec<DeviceWatcher> = Vec::new();
+    for selector in selectors {
+        let watcher = DeviceInformation::CreateWatcherAqsFilter(&selector)?;
+        let ready = Arc::new(AtomicBool::new(false));
+        let known: Arc<Mutex<std::collections::HashMap<String, (String, crate::deviceicons::Kind)>>> = Arc::new(Mutex::new(Default::default()));
+        {
+            let (ready, known, shared) = (ready.clone(), known.clone(), shared.clone());
+            watcher.Added(&TypedEventHandler::<DeviceWatcher, DeviceInformation>::new(move |_, info| {
+                let Some(info) = info.as_ref() else { return Ok(()) };
+                let id = info.Id()?;
+                let name = info.Name()?.to_string();
+                // the "class of device" says what it is (a speaker, a controller ...) when it is a classic Bluetooth device
+                let class = BluetoothDevice::FromIdAsync(&id).ok().and_then(|op| op.get().ok()).and_then(|d| d.ClassOfDevice().ok()).and_then(|c| c.RawValue().ok());
+                let kind = crate::deviceicons::classify(class, &name);
+                if let Ok(mut k) = known.lock() {
+                    k.insert(id.to_string(), (name.clone(), kind));
+                }
+                if ready.load(Ordering::SeqCst) && !name.is_empty() {
+                    send_device(hwnd, &shared, name, kind, true);
+                }
+                Ok(())
+            }))?;
+        }
+        {
+            let ready = ready.clone();
+            watcher.EnumerationCompleted(&TypedEventHandler::<DeviceWatcher, windows::core::IInspectable>::new(move |_, _| {
+                ready.store(true, Ordering::SeqCst);
+                Ok(())
+            }))?;
+        }
+        {
+            let (ready, known, shared) = (ready.clone(), known.clone(), shared.clone());
+            watcher.Removed(&TypedEventHandler::<DeviceWatcher, DeviceInformationUpdate>::new(move |_, upd| {
+                let Some(upd) = upd.as_ref() else { return Ok(()) };
+                let id = upd.Id()?.to_string();
+                let found = known.lock().ok().and_then(|mut k| k.remove(&id));
+                if let (true, Some((name, kind))) = (ready.load(Ordering::SeqCst), found) {
+                    if !name.is_empty() {
+                        send_device(hwnd, &shared, name, kind, false);
+                    }
+                }
+                Ok(())
+            }))?;
+        }
+        watcher.Start()?;
+        watchers.push(watcher);
+    }
+    // the watchers work in the background: this thread only has to keep them alive
+    loop {
+        std::thread::sleep(Duration::from_secs(3600));
+        let _ = &watchers;
+    }
 }
 
 struct Watch {

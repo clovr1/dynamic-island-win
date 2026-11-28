@@ -68,6 +68,8 @@ pub enum Id {
     DemoFs,
     DemoStatus,
     StatusPills,
+    DevicePills,
+    HidePopups,
     DndQuiet,
     Sounds,
     Volume,
@@ -392,6 +394,13 @@ impl Panel {
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as usize).unwrap_or(0);
         let keys = ["wifi", "bluetooth", "airplane", "dnd", "nightlight", "energy", "hotspot", "cellular"];
         self.status_n += 1;
+        if self.status_n % 3 == 0 {
+            use crate::deviceicons::Kind;
+            let devs = [("JBL Flip 6", Kind::Speaker), ("Xbox Wireless Controller", Kind::Controller), ("WH-1000XM5", Kind::Headphones), ("MX Keys", Kind::Keyboard), ("MX Master 3", Kind::Mouse)];
+            let (name, kind) = devs[(self.status_n / 3 + t / 7) % devs.len()];
+            self.preview.push_status(StatusData::Device { name: name.into(), kind, connected: true });
+            return;
+        }
         if self.status_n % 9 == 0 {
             self.preview.push_status(StatusData::Battery { label: "Charging".into(), level: 64, charging: true, low: false });
         } else {
@@ -530,7 +539,9 @@ impl Panel {
             2 => vec![
                 Row::Toggle(Id::Notif, "Show notifications in the island", "Messages from your apps appear at the top of the screen", s.notifications),
                 Row::Toggle(Id::Bubble, "Small bubble next to the music pill", "A small bubble while music plays, otherwise a card", s.use_bubble),
+                Row::Toggle(Id::HidePopups, "Only show them in Bloop", "While Bloop runs, Windows' own pop-ups are switched off for your apps (they come back when Bloop quits)", s.hide_windows_popups),
                 Row::Toggle(Id::StatusPills, "Status pills", "A slim pill when Wi-Fi, Bluetooth, airplane mode, battery ... change", s.status_pills),
+                Row::Toggle(Id::DevicePills, "Bluetooth device pills", "A pill with the device's picture (speaker, controller ...) when it connects", s.device_pills),
                 Row::Toggle(Id::DndQuiet, "Respect Do Not Disturb", "While it is on, notifications are only listed in the island's home view", s.dnd_quiet),
                 Row::Slider(Id::CardSecs, "How long a card stays", "Seconds before it goes away", s.card_secs as f32, 2.0, 20.0, format!("{} s", s.card_secs)),
                 Row::Button(Id::Test, "Test", "Show a test notification now".into(), "Show".into(), 0),
@@ -1222,6 +1233,8 @@ impl Panel {
             Id::Notif => "Messages from your apps",
             Id::Bubble => "A small bubble while music plays",
             Id::StatusPills => "Wi-Fi, Bluetooth, battery ...",
+            Id::DevicePills => "Speaker, controller ... connected",
+            Id::HidePopups => "No double pop-ups from Windows",
             Id::DndQuiet => "Only listed in the home view",
             Id::Sounds => "Notifications, pills, play / skip",
             Id::FsHide => "Videos and games get the screen",
@@ -1515,6 +1528,8 @@ impl Panel {
             Id::FsHide => s.fullscreen_hide = !s.fullscreen_hide,
             Id::CheckUpd => s.check_updates = !s.check_updates,
             Id::StatusPills => s.status_pills = !s.status_pills,
+            Id::DevicePills => s.device_pills = !s.device_pills,
+            Id::HidePopups => s.hide_windows_popups = !s.hide_windows_popups,
             Id::Sounds => s.sounds = !s.sounds,
             Id::PlayerVolume => s.player_volume = !s.player_volume,
             Id::DndQuiet => s.dnd_quiet = !s.dnd_quiet,

@@ -152,3 +152,30 @@ fn ui_with_respect(respect: bool) -> Ui {
     u.set_settings(&s);
     u
 }
+
+#[test]
+fn a_bluetooth_device_pill() {
+    use island::deviceicons::Kind;
+    use island::ui::Sound;
+    let mut ui = ui();
+    ui.push_status(StatusData::Device { name: "JBL Flip 6".into(), kind: Kind::Speaker, connected: true });
+    run(&mut ui, 1.0);
+    assert_eq!(ui.mode(), Mode::Card);
+    let (_, _, w, h) = ui.rect_px();
+    assert!(w > 300.0 && w < 340.0 && h > 60.0 && h < 72.0, "a taller pill than the other status pills: {w} x {h}");
+    assert!(ui.take_sounds().iter().any(|s| matches!(s, Sound::Status(3))), "the Bluetooth \"on\" sound");
+    // the same device reported twice (classic and low energy) is shown once: the second report changes nothing
+    run(&mut ui, 5.0);
+    assert_ne!(ui.mode(), Mode::Card, "the pill is gone after a few seconds");
+    ui.push_status(StatusData::Device { name: "JBL Flip 6".into(), kind: Kind::Speaker, connected: true });
+    run(&mut ui, 0.5);
+    assert_ne!(ui.mode(), Mode::Card, "a repeat right after is ignored");
+    // and it can be switched off
+    let mut off = Ui::new(1.0);
+    let mut s = Settings::default();
+    s.device_pills = false;
+    off.set_settings(&s);
+    off.push_status(StatusData::Device { name: "X".into(), kind: Kind::Other, connected: true });
+    run(&mut off, 1.0);
+    assert_ne!(off.mode(), Mode::Card);
+}

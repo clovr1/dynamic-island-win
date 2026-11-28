@@ -111,6 +111,7 @@ struct App {
     /// a downloaded, checked update waits to be swapped in (its version)
     update_ready: Option<String>,
     clock: String,
+    ticks: u32,
 }
 
 /// `%APPDATA%\DynamicIsland\settings.ini`
@@ -254,6 +255,10 @@ impl App {
 
     /// Full screen / maximized window: asked about once a second (Windows has no cheaper way to tell us).
     fn check_env(&mut self) {
+        self.ticks += 1;
+        if self.ticks % 60 == 0 && self.settings.hide_windows_popups {
+            crate::popups::hide();
+        }
         self.update_clock();
         self.refresh_volume();
         let mut env = self.ui.env();
@@ -340,6 +345,9 @@ impl App {
             log(&format!("notifications: showing {} (Windows Do Not Disturb: {}, the island respects it: {})", list.len(), if dnd { "on" } else { "off" }, if respect { "yes - they are only listed" } else { "no" }));
         }
         for n in list {
+            if self.settings.hide_windows_popups {
+                crate::popups::hide_app(&n.aumid);
+            }
             // Windows announces "Bluetooth turned on" etc. as toasts: those become the island's own status pill
             if let Some((key, on)) = crate::sysicons::toast_to_sys(&n.app, &n.title) {
                 self.ui.push_status(StatusData::Sys { key: key.to_string(), on });
@@ -444,6 +452,13 @@ impl App {
             return;
         }
         let size_changed = s.scale_pct != self.settings.scale_pct;
+        if s.hide_windows_popups != self.settings.hide_windows_popups {
+            if s.hide_windows_popups {
+                crate::popups::hide();
+            } else {
+                crate::popups::restore();
+            }
+        }
         if s.sounds != self.settings.sounds {
             crate::sound::set_enabled(s.sounds);
         }
@@ -496,6 +511,7 @@ impl App {
             match m {
                 SysMsg::Toggle(key, on) => self.ui.push_status(StatusData::Sys { key, on }),
                 SysMsg::Battery { label, level, charging, low } => self.ui.push_status(StatusData::Battery { label, level, charging, low }),
+                SysMsg::Device { name, kind, connected } => self.ui.push_status(StatusData::Device { name, kind, connected }),
                 SysMsg::Dnd { on, first } => {
                     self.ui.set_dnd(on);
                     if !first {
@@ -1018,7 +1034,14 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
                 with_app(|a| a.center());
                 return LRESULT(0);
             }
+            // Windows is shutting down / the user signs out: the banners must be back before we are gone
+            WM_ENDSESSION if wp.0 != 0 => {
+                crate::popups::restore();
+                return LRESULT(0);
+            }
             WM_DESTROY => {
+                // Windows' own banners come back
+                crate::popups::restore();
                 remove_tray_icon(hwnd);
                 PostQuitMessage(0);
                 return LRESULT(0);
@@ -1068,6 +1091,11 @@ pub fn run() {
         let dpi_scale = GetDpiForSystem() as f32 / 96.0;
         let settings = load_settings();
         crate::sound::set_enabled(settings.sounds);
+        // (a banner switch left over from a run that could not tidy up is put back first)
+        crate::popups::restore();
+        if settings.hide_windows_popups {
+            crate::popups::hide();
+        }
         let scale = dpi_scale * settings.scale_pct as f32 / 100.0;
         let mut ui = Ui::new(scale);
         ui.set_settings(&settings);
@@ -1120,7 +1148,7 @@ pub fn run() {
 
         let shared = Arc::new(Shared::default());
         APP.with(|a| {
-            *a.borrow_mut() = Some(App { hwnd, ui, mem_dc, bits: bits as *mut u8, pw, ph, shared: shared.clone(), tracking: false, timer: Need::Rest, last: Instant::now(), bmp, dpi_scale, settings, update_ready: None, clock: String::new() });
+            *a.borrow_mut() = Some(App { hwnd, ui, mem_dc, bits: bits as *mut u8, pw, ph, shared: shared.clone(), tracking: false, timer: Need::Rest, last: Instant::now(), bmp, dpi_scale, settings, update_ready: None, clock: String::new(), ticks: 0 });
         });
         with_app(|a| a.present());
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);

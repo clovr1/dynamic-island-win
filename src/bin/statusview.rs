@@ -25,6 +25,12 @@ fn main() {
         run(&mut ui, 1.0);
         shots.push(ui.render().clone());
     }
+    for (name, kind, c) in [("JBL Flip 6", island::deviceicons::Kind::Speaker, true), ("Xbox Wireless Controller", island::deviceicons::Kind::Controller, true), ("WH-1000XM5", island::deviceicons::Kind::Headphones, false)] {
+        let mut ui = mk();
+        ui.push_status(StatusData::Device { name: name.into(), kind, connected: c });
+        run(&mut ui, 1.0);
+        shots.push(ui.render().clone());
+    }
     for (label, level, charging, low) in [("Charging", 64, true, false), ("Unplugged", 64, false, false), ("Low Battery", 18, false, true)] {
         let mut ui = mk();
         ui.push_status(StatusData::Battery { label: label.into(), level, charging, low });

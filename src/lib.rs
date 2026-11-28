@@ -1,5 +1,6 @@
 pub mod anim;
 pub mod brands;
+pub mod deviceicons;
 pub mod gfx;
 pub mod lyrics;
 pub mod panel;
@@ -13,6 +14,8 @@ pub mod version;
 pub mod media;
 #[cfg(windows)]
 pub mod net;
+#[cfg(windows)]
+pub mod popups;
 #[cfg(windows)]
 pub mod sound;
 #[cfg(windows)]
