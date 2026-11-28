@@ -37,7 +37,7 @@
   }
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
 body {
   margin: 0;
   background: var(--bg);
@@ -50,7 +50,7 @@ img { max-width: 100%; height: auto; display: block; }
 .wrap { width: min(1080px, 100% - 40px); margin-inline: auto; }
 
 /* top bar */
-header.top { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+header.top { position: relative; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line); }
 header.top .wrap { display: flex; align-items: center; gap: 24px; height: 64px; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 20px; letter-spacing: -0.02em; text-decoration: none; }
 .brand img { width: 34px; height: 34px; }
