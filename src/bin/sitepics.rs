@@ -68,7 +68,7 @@ fn shot(ui: &mut Ui, hue: u8, crop_h: f32) -> Pixmap {
 fn main() {
     let out = std::env::args().nth(1).unwrap_or_else(|| "site/img".into());
     std::fs::create_dir_all(&out).unwrap();
-    let music = |playing| MediaInfo { active: true, title: "Gravity".into(), artist: "Beach Bunny".into(), playing, pos: 75.0, dur: 200.0 };
+    let music = |playing| MediaInfo { active: true, title: "Low Tide".into(), artist: "Paper Boats".into(), playing, pos: 75.0, dur: 200.0 };
     let cover = || art([255, 157, 58], [106, 75, 216], 128);
 
     // music pill
@@ -94,7 +94,7 @@ fn main() {
     run(&mut ui, 2.0);
     ui.toggle_lyrics();
     if let Some(req) = ui.take_lyrics_request() {
-        let lrc = "[00:08.00]Remember those walls I built?\n[00:14.00]Well, baby, they're tumbling down\n[00:20.00]And they didn't even put up a fight\n[00:26.00]They didn't even make a sound\n[00:32.00]I found a way to let you in";
+        let lrc = "[00:08.00]Streetlights hum a quiet tune\n[00:14.00]Every window painted blue\n[00:20.00]Take the long way home with me\n[00:26.00]Let the whole city fade away\n[00:32.00]Tide pulls out, night rolls in";
         ui.set_lyrics(&req.key, Some(island::lyrics::Found { synced: true, lines: island::lyrics::parse_lrc(lrc) }));
     }
     run(&mut ui, 3.0);
