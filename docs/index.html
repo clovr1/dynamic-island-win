@@ -284,7 +284,6 @@ header.top.scrolled { box-shadow: 0 10px 30px -18px rgba(0,0,0,.35); }
 .deco.c { width: 380px; height: 380px; border-radius: 50%; background: var(--orange); opacity: .13; right: -110px; top: -130px; }
 .deco.p { width: 460px; height: 124px; border-radius: 62px; background: var(--ink); opacity: .06; left: -150px; bottom: 40px; }
 h1 em { position: relative; display: inline-block; }
-h1 em::after { content: ""; position: absolute; left: 2%; right: 2%; bottom: .02em; height: .09em; border-radius: .1em; background: var(--ink); transform-origin: left; }
 
 /* the island on the right of the headline plays by itself */
 .heroart { position: relative; }
@@ -357,7 +356,6 @@ ol.tut p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: 15.5px;
 /* everything that moves, only for people who did not ask for less motion */
 @media (prefers-reduced-motion: no-preference) {
   h1 .w { display: inline-block; animation: rise .9s cubic-bezier(.2,.9,.3,1.25) both; animation-delay: calc(var(--i) * 70ms + 120ms); }
-  h1 em::after { transform: scaleX(0); animation: swoosh .9s cubic-bezier(.2,.9,.3,1) 1.0s forwards; }
   .hero .lead { animation: fadeup .8s ease both .75s; } .hero .cta { animation: fadeup .8s ease both .9s; } .hero .fine { animation: fadeup .8s ease both 1.05s; }
   .hero .heroart { animation: fadeup 1s cubic-bezier(.2,.9,.3,1.1) both .4s; }
   .deco.c { animation: drift 16s ease-in-out infinite alternate; }
