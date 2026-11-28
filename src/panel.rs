@@ -200,7 +200,7 @@ const ITEMS_TOP: f32 = 480.0;
 enum Piece {
     Heading(String),
     Text(String),
-    Chip { id: Id, label: String, on: bool },
+    Chip { id: Id, label: String, desc: String, on: bool, radio: bool },
     Action { id: Id, label: String, style: u8 },
     Dial { id: Id, label: String, v: f32, lo: f32, hi: f32, val: String, unit: String },
     Orb(u8, &'static str, bool),
@@ -884,9 +884,9 @@ impl Panel {
         for (i, pc) in pieces.iter().enumerate() {
             let (iw, ih, newline) = match pc {
                 Piece::Heading(_) | Piece::Text(_) => (cw, 26.0, true),
-                Piece::Chip { label, .. } => ((self.fonts.measure(Weight::Semibold, label, 14.5 * s) / s + 56.0).min(cw), 42.0, false),
+                Piece::Chip { .. } => (if cw >= 560.0 { (cw - 12.0) / 2.0 } else { cw }, 66.0, false),
                 Piece::Action { label, .. } => (self.fonts.measure(Weight::Semibold, label, 14.5 * s) / s + 44.0, 42.0, false),
-                Piece::Dial { .. } => (296.0, 58.0, false),
+                Piece::Dial { .. } => (if cw >= 560.0 { (cw - 12.0) / 2.0 } else { cw }, 58.0, false),
                 Piece::Orb(..) => (78.0, 86.0, false),
             };
             // a new line when it does not fit, for headings, and when the kind of thing changes (switches / dials / orbs)
@@ -913,22 +913,34 @@ impl Panel {
                     let t = self.fonts.fit(Weight::Regular, t, 13.5 * s, iw * s);
                     self.fonts.draw(&mut pm, Weight::Regular, &t, x * s, (oy + 17.0) * s, 13.5 * s, DIM, 1.0);
                 }
-                Piece::Chip { id, label, on } => {
+                Piece::Chip { id, label, desc, on, radio } => {
+                    // a card: the name and what it does on the left, a switch (or a round choice dot) on the right
                     let t = self.want(*id, if *on { 1.0 } else { 0.0 });
                     let e = t * t * (3.0 - 2.0 * t);
-                    let squash = 1.0 + 0.07 * (std::f32::consts::PI * t).sin();
                     let hov = self.hover == Some(*id);
-                    let (bw, bh) = (iw * squash, ih / squash);
-                    let (bx, by) = (x + (iw - bw) / 2.0, oy + (ih - bh) / 2.0);
                     let base = if hov { CARD_HOVER } else { CARD };
-                    rr(&mut pm, s, bx - 1.0, by - 1.0, bw + 2.0, bh + 2.0, bh / 2.0 + 1.0, mix(EDGE, acc, e), 1.0);
-                    rr(&mut pm, s, bx, by, bw, bh, bh / 2.0, mix(base, acc, e), 1.0);
-                    // the dot: hollow when off, a solid white one when on
-                    rr(&mut pm, s, bx + 16.0, by + bh / 2.0 - 6.0, 12.0, 12.0, 6.0, mix(EDGE, on_acc, e), 1.0);
-                    rr(&mut pm, s, bx + 18.0, by + bh / 2.0 - 4.0, 8.0, 8.0, 4.0, mix(base, acc, e), 1.0);
-                    rr(&mut pm, s, bx + 19.5, by + bh / 2.0 - 2.5, 5.0, 5.0, 2.5, on_acc, e);
-                    let l = self.fonts.fit(Weight::Semibold, label, 14.5 * s, (iw - 52.0) * s);
-                    self.text_mid(&mut pm, Weight::Semibold, &l, bx + 38.0, by + bh / 2.0, 14.5, mix(TEXT, on_acc, e));
+                    rr(&mut pm, s, x - 1.0, oy - 1.0, iw + 2.0, ih + 2.0, 15.0, mix(EDGE, acc, e * 0.7), 1.0);
+                    rr(&mut pm, s, x, oy, iw, ih, 14.0, base, 1.0);
+                    let tw = iw - 14.0 - 74.0;
+                    let l = self.fonts.fit(Weight::Semibold, label, 14.0 * s, tw * s);
+                    self.text_mid(&mut pm, Weight::Semibold, &l, x + 14.0, oy + 24.0, 14.0, TEXT);
+                    let d = self.fonts.fit(Weight::Regular, desc, 11.5 * s, tw * s);
+                    self.text_mid(&mut pm, Weight::Regular, &d, x + 14.0, oy + 45.0, 11.5, DIM);
+                    if *radio {
+                        let (rx, ry) = (x + iw - 14.0 - 22.0, oy + ih / 2.0 - 11.0);
+                        rr(&mut pm, s, rx, ry, 22.0, 22.0, 11.0, mix(EDGE, acc, e), 1.0);
+                        rr(&mut pm, s, rx + 2.0, ry + 2.0, 18.0, 18.0, 9.0, base, 1.0);
+                        rr(&mut pm, s, rx + 6.0, ry + 6.0, 10.0, 10.0, 5.0, acc, e);
+                    } else {
+                        let (sw_, sh_) = (46.0, 26.0);
+                        let (sx, sy) = (x + iw - 14.0 - sw_, oy + ih / 2.0 - sh_ / 2.0);
+                        rr(&mut pm, s, sx, sy, sw_, sh_, sh_ / 2.0, mix([88, 88, 102], acc, e), 1.0);
+                        // the knob stretches while it travels, like a drop of water
+                        let kd = 20.0;
+                        let stretch = (std::f32::consts::PI * t).sin() * 9.0;
+                        let kx = sx + 3.0 + e * (sw_ - 6.0 - kd) - stretch * e;
+                        rr(&mut pm, s, kx, sy + 3.0, kd + stretch, kd, kd / 2.0, [255, 255, 255], 1.0);
+                    }
                     self.hot.push(Hot { id: *id, x, y: oy, w: iw, h: ih });
                 }
                 Piece::Action { id, label, style } => {
@@ -991,7 +1003,7 @@ impl Panel {
             let age = (self.t_anim - r.t0) / 0.55;
             let (rx, ry, rw, rh) = r.rect;
             let rad = age.sqrt() * rw.max(rh) * 0.5;
-            if let (Some(mut mask), Some(clip), Some(circle)) = (Mask::new(pw, ph), crate::gfx::rrect(rx * s, ry * s, rw * s, rh * s, [rh * 0.5 * s; 4]), crate::gfx::rrect((r.x - rad) * s, (r.y - rad) * s, rad * 2.0 * s, rad * 2.0 * s, [rad * s; 4])) {
+            if let (Some(mut mask), Some(clip), Some(circle)) = (Mask::new(pw, ph), crate::gfx::rrect(rx * s, ry * s, rw * s, rh * s, [rh.min(30.0) * 0.5 * s; 4]), crate::gfx::rrect((r.x - rad) * s, (r.y - rad) * s, rad * 2.0 * s, rad * 2.0 * s, [rad * s; 4])) {
                 mask.fill_path(&clip, tiny_skia::FillRule::Winding, true, Transform::identity());
                 let mut paint = Paint::default();
                 paint.set_color_rgba8(255, 255, 255, ((1.0 - age) * 60.0) as u8);
@@ -1106,16 +1118,39 @@ impl Panel {
         }
     }
 
+    /// The short line under a card's name (the long one is shown under the dock while the mouse is on it).
+    fn short_desc(id: Id) -> Option<&'static str> {
+        Some(match id {
+            Id::Autostart => "Open Bloop when you sign in",
+            Id::Pill => "Cover and equalizer at the top",
+            Id::PlayerFront => "No pill while the player is open",
+            Id::Lyrics => "Lyrics button, from lrclib.net",
+            Id::PlayerVolume => "Music volume in the player",
+            Id::Eq => "Otherwise it is white",
+            Id::Notif => "Messages from your apps",
+            Id::Bubble => "A small bubble while music plays",
+            Id::StatusPills => "Wi-Fi, Bluetooth, battery ...",
+            Id::DndQuiet => "Only listed in the home view",
+            Id::Sounds => "Notifications, pills, play / skip",
+            Id::FsHide => "Videos and games get the screen",
+            Id::CheckUpd => "Every 6 hours, from GitHub",
+            Id::MaxOpt(0) => "A thin notch hangs from the top",
+            Id::MaxOpt(1) => "Gone until the mouse hits the top",
+            Id::MaxOpt(2) => "The island stays as it is",
+            _ => return None,
+        })
+    }
+
     /// The rows of a page as the pieces the page is made of: chips, dials, orbs and buttons.
     fn pieces(&self, rows: &[Row]) -> Vec<Piece> {
         let mut out = Vec::new();
         for r in rows {
             match r {
-                Row::Toggle(id, title, _, on) => {
+                Row::Toggle(id, title, desc, on) => {
                     if *id == Id::FsHide {
                         out.push(Piece::Heading("Full-screen apps".into()));
                     }
-                    out.push(Piece::Chip { id: *id, label: title.to_string(), on: *on });
+                    out.push(Piece::Chip { id: *id, label: title.to_string(), desc: Self::short_desc(*id).map(|d| d.to_string()).unwrap_or_else(|| desc.to_string()), on: *on, radio: false });
                 }
                 Row::Slider(id, title, _, v, lo, hi, text) => {
                     let (val, unit) = match text.split_once(' ') {
@@ -1124,10 +1159,11 @@ impl Panel {
                     };
                     out.push(Piece::Dial { id: *id, label: title.to_string(), v: *v, lo: *lo, hi: *hi, val, unit });
                 }
-                Row::Radio(title, _, chosen, _) => {
+                Row::Radio(title, _, chosen, opts) => {
                     out.push(Piece::Heading(title.to_string()));
-                    for (i, label) in ["Slim notch", "Hide", "Do nothing"].iter().enumerate() {
-                        out.push(Piece::Chip { id: Id::MaxOpt(i as u8), label: label.to_string(), on: *chosen == i });
+                    let short = ["Slim notch", "Hide", "Do nothing"];
+                    for i in 0..3 {
+                        out.push(Piece::Chip { id: Id::MaxOpt(i as u8), label: short[i].to_string(), desc: Self::short_desc(Id::MaxOpt(i as u8)).map(|d| d.to_string()).unwrap_or_else(|| opts[i].to_string()), on: *chosen == i, radio: true });
                     }
                 }
                 Row::Themes(chosen) => {
