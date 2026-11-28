@@ -12,6 +12,7 @@
 <meta name="theme-color" content="#f4eee1">
 <link rel="icon" type="image/png" href="img/favicon.png">
 <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<script>document.documentElement.classList.add("js")</script>
 <style>
 :root {
   --bg: #f4eee1;
@@ -271,6 +272,149 @@ footer a { color: var(--dim); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .island, .iw, .bub, .layer, .ly .tr, .ly .l, .win { transition-duration: .01s !important; } .playing .eq b { animation: none; transform: scaleY(.7); } }
 
+
+/* ---- motion ---- */
+.btn { position: relative; }
+header.top { transition: box-shadow .3s ease, background .3s ease; }
+header.top.scrolled { box-shadow: 0 10px 30px -18px rgba(0,0,0,.35); }
+
+.hero { position: relative; overflow: hidden; }
+.hero .wrap { position: relative; z-index: 1; }
+.deco { position: absolute; pointer-events: none; z-index: 0; }
+.deco.c { width: 380px; height: 380px; border-radius: 50%; background: var(--orange); opacity: .13; right: -110px; top: -130px; }
+.deco.p { width: 460px; height: 124px; border-radius: 62px; background: var(--ink); opacity: .06; left: -150px; bottom: 40px; }
+h1 em { position: relative; display: inline-block; }
+h1 em::after { content: ""; position: absolute; left: 2%; right: 2%; bottom: .02em; height: .09em; border-radius: .1em; background: var(--ink); transform-origin: left; }
+
+/* the island on the right of the headline plays by itself */
+.heroart { position: relative; }
+.hscene { --sc: 1; position: relative; aspect-ratio: 1 / .78; border-radius: 28px; overflow: hidden; background: #14131c; box-shadow: 0 30px 60px -30px rgba(0,0,0,.45); }
+.hwall { position: absolute; inset: 0; background:
+  radial-gradient(60% 70% at 18% 8%, rgba(122,70,255,.55), transparent 62%),
+  radial-gradient(55% 60% at 88% 92%, rgba(255,92,40,.42), transparent 60%),
+  radial-gradient(50% 60% at 80% 12%, rgba(40,190,200,.35), transparent 60%),
+  linear-gradient(180deg, #1c1830, #0e0e16); }
+.hisl { position: absolute; left: 50%; top: 16px; width: 236px; height: 40px; border-radius: 20px; background: #000; color: #fff; overflow: hidden; transform: translateX(-50%) scale(var(--sc)); transform-origin: top center; font-size: 14px; line-height: 1.3; }
+.hl { position: absolute; opacity: 0; }
+.hl-play { inset: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; opacity: 1; }
+.hl-play .cov { width: 26px; height: 26px; }
+.hl-open, .hl-lyr { left: 50%; top: 0; width: 400px; transform: translateX(-50%); }
+.hl-open { height: 214px; } .hl-lyr { height: 300px; }
+.hl-open .ib { cursor: default; } .hl-open .ib:hover { background: none; }
+.hl-open .ctl { top: 126px; }
+.hl-open .prog { top: 104px; }
+.bar i.hfill { width: 11%; }
+.hlines { position: absolute; left: 22px; right: 22px; top: 74px; }
+.hln { display: block; width: max-content; max-width: 100%; white-space: nowrap; font-size: 19px; line-height: 1.25; font-weight: 800; padding: 8px 0; transform-origin: left center; transform: scale(.88);
+  color: transparent; -webkit-background-clip: text; background-clip: text;
+  background-image: linear-gradient(90deg, #fff 0, #fff 45%, rgba(255,255,255,.34) 55%, rgba(255,255,255,.34) 100%); background-size: 250% 100%; background-position: 100% 0; }
+.hln.dim { background-image: none; color: rgba(255,255,255,.34); }
+.hl-card { inset: 0; display: flex; align-items: center; gap: 12px; padding: 0 14px; }
+.hico { width: 44px; height: 44px; border-radius: 12px; background: #30d158; flex: none; }
+.htx b { display: block; font-size: 15px; } .htx span { display: block; color: #b4b4bc; font-size: 13.5px; white-space: nowrap; }
+.hbub { position: absolute; left: 50%; top: 16px; width: 38px; height: 38px; border-radius: 50%; background: #000; margin-left: calc(118px * var(--sc) + 10px); display: grid; place-items: center; transform: scale(0); }
+.hbub i { width: 26px; height: 26px; border-radius: 8px; background: #30d158; }
+@media (max-width: 480px) { .hscene { --sc: .8; } }
+
+/* the strip of pills */
+.ticker { overflow: hidden; padding: 6px 0 34px; -webkit-mask-image: linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent); mask-image: linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent); }
+.track { display: flex; gap: 12px; width: max-content; }
+.tp { display: inline-flex; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 999px; background: var(--night); color: #fff; font-size: 15px; white-space: nowrap; }
+.tp i { width: 10px; height: 10px; border-radius: 50%; }
+.tp b { font-weight: 700; } .tp em { font-style: normal; color: #a9a9b2; }
+
+/* features */
+.feat { transition: transform .35s cubic-bezier(.3,1.5,.5,1), box-shadow .3s ease; }
+.feat .dot { transition: width .45s cubic-bezier(.34,1.6,.5,1), border-radius .4s ease; }
+.feat:hover { transform: translateY(-6px) rotate(-.4deg); box-shadow: 0 22px 30px -22px rgba(0,0,0,.45); }
+.feat:hover .dot { width: 38px; border-radius: 7px; }
+
+/* the tutorial */
+ol.tut { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+@media (max-width: 760px) { ol.tut { grid-template-columns: minmax(0, 1fr); } }
+ol.tut li { background: var(--card); border: 1px solid var(--line); border-radius: 24px; overflow: hidden; transition: transform .35s cubic-bezier(.3,1.5,.5,1), box-shadow .3s ease; }
+ol.tut li:hover { transform: translateY(-4px); box-shadow: 0 24px 34px -24px rgba(0,0,0,.45); }
+ol.tut img { width: 100%; height: auto; display: block; }
+ol.tut .tb { padding: 18px 22px 22px; display: grid; grid-template-columns: auto 1fr; column-gap: 12px; row-gap: 6px; align-items: center; }
+ol.tut .n { width: 34px; height: 34px; border-radius: 50%; background: var(--orange); color: #fff; display: grid; place-items: center; font-weight: 800; }
+ol.tut h3 { margin: 0; font-size: 20px; letter-spacing: -.01em; }
+ol.tut p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: 15.5px; }
+
+/* the closing banner */
+.band { position: relative; overflow: hidden; }
+.band > *:not(.bubs) { position: relative; z-index: 1; }
+.bubs { position: absolute; inset: 0; pointer-events: none; }
+.bubs i { position: absolute; bottom: -40px; border-radius: 50%; background: var(--orange); opacity: 0; }
+
+/* the tour button on the demo */
+.tourbtn { position: absolute; left: 14px; bottom: 58px; z-index: 5; appearance: none; border: 0; font: inherit; font-size: 13.5px; font-weight: 700; color: #fff; background: rgba(0,0,0,.55); backdrop-filter: blur(8px); border-radius: 999px; padding: 8px 14px 8px 12px; display: inline-flex; align-items: center; gap: 9px; cursor: pointer; transition: transform .15s ease, background .2s; }
+.tourbtn:hover { background: rgba(0,0,0,.75); } .tourbtn:active { transform: scale(.96); }
+.tourbtn i { width: 9px; height: 9px; border-radius: 50%; background: #8a8a92; }
+.tourbtn.on i { background: var(--orange); }
+.tourbtn:focus-visible { outline: 3px solid var(--orange); outline-offset: 2px; }
+.desk[data-env="fs"] .tourbtn { bottom: 14px; }
+
+/* everything that moves, only for people who did not ask for less motion */
+@media (prefers-reduced-motion: no-preference) {
+  h1 .w { display: inline-block; animation: rise .9s cubic-bezier(.2,.9,.3,1.25) both; animation-delay: calc(var(--i) * 70ms + 120ms); }
+  h1 em::after { transform: scaleX(0); animation: swoosh .9s cubic-bezier(.2,.9,.3,1) 1.0s forwards; }
+  .hero .lead { animation: fadeup .8s ease both .75s; } .hero .cta { animation: fadeup .8s ease both .9s; } .hero .fine { animation: fadeup .8s ease both 1.05s; }
+  .hero .heroart { animation: fadeup 1s cubic-bezier(.2,.9,.3,1.1) both .4s; }
+  .deco.c { animation: drift 16s ease-in-out infinite alternate; }
+  .deco.p { animation: drift2 19s ease-in-out infinite alternate; }
+  .hero .btn:not(.ghost)::after { content: ""; position: absolute; inset: 0; border-radius: inherit; animation: ring 3.6s ease-out infinite 2.2s; pointer-events: none; }
+  .btn:hover svg { animation: hop .6s ease; }
+
+  .hisl { animation: hsize 18s infinite cubic-bezier(.34,1.35,.5,1); }
+  .hl-play { animation: h-play 18s infinite; }
+  .hl-open { animation: h-open 18s infinite; }
+  .hl-lyr { animation: h-lyr 18s infinite; }
+  .hl-card { animation: h-card 18s infinite; }
+  .hbub { animation: h-bub 18s infinite cubic-bezier(.3,1.7,.5,1); }
+  .bar i.hfill { animation: h-fill 18s infinite linear; }
+  .hpp { animation: h-tap 18s infinite; }
+  .hln:not(.dim) { animation: h-lit 18s infinite both, h-wipe 18s infinite both linear; animation-delay: calc(18s * (0.40 + 0.055 * var(--k))); }
+  .track { animation: tick 46s linear infinite; }
+  .ticker:hover .track { animation-play-state: paused; }
+  .bubs i { animation: bubble 7s linear infinite; }
+
+  /* things rise into view as you scroll */
+  .js .rv { opacity: 0; transform: translateY(26px) scale(.985); transition: opacity .7s ease, transform .85s cubic-bezier(.2,.9,.3,1.15); transition-delay: var(--d, 0ms); }
+  .js .rv.in { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hisl { width: 400px; height: 214px; border-radius: 34px; }
+  .hl-play, .hbub { display: none; } .hl-open { opacity: 1; }
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(.55em) rotate(3deg); } to { opacity: 1; transform: none; } }
+@keyframes fadeup { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+@keyframes swoosh { to { transform: scaleX(1); } }
+@keyframes drift { from { transform: translate(0, 0) scale(1); } to { transform: translate(-50px, 60px) scale(1.08); } }
+@keyframes drift2 { from { transform: translate(0, 0) rotate(-4deg); } to { transform: translate(80px, -30px) rotate(3deg); } }
+@keyframes ring { 0% { box-shadow: 0 0 0 0 rgba(255,92,40,.45); } 55%, 100% { box-shadow: 0 0 0 18px rgba(255,92,40,0); } }
+@keyframes hop { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(4px); } 70% { transform: translateY(-2px); } }
+@keyframes tick { to { transform: translateX(-50%); } }
+@keyframes bubble { 0% { transform: translateY(0) scale(.6); opacity: 0; } 15% { opacity: .55; } 100% { transform: translateY(-420px) scale(1.1); opacity: 0; } }
+
+@keyframes hsize {
+  0%, 11% { width: 236px; height: 40px; border-radius: 20px; }
+  14%, 36% { width: 400px; height: 214px; border-radius: 34px; }
+  39%, 58% { width: 400px; height: 300px; border-radius: 34px; }
+  61%, 72% { width: 236px; height: 40px; border-radius: 20px; }
+  75%, 86% { width: 360px; height: 72px; border-radius: 36px; }
+  89%, 100% { width: 236px; height: 40px; border-radius: 20px; }
+}
+@keyframes h-play { 0%, 12% { opacity: 1; } 13.5%, 60% { opacity: 0; } 62%, 73% { opacity: 1; } 74.5%, 87.5% { opacity: 0; } 89.5%, 100% { opacity: 1; } }
+@keyframes h-open { 0%, 14.5% { opacity: 0; } 16.5%, 36% { opacity: 1; } 38.5%, 100% { opacity: 0; } }
+@keyframes h-lyr { 0%, 37% { opacity: 0; } 40.5%, 57% { opacity: 1; } 59%, 100% { opacity: 0; } }
+@keyframes h-card { 0%, 75.5% { opacity: 0; } 77.5%, 86% { opacity: 1; } 87.5%, 100% { opacity: 0; } }
+@keyframes h-bub { 0%, 62% { transform: scale(0); } 64%, 71% { transform: scale(1); } 72.5%, 100% { transform: scale(0); } }
+@keyframes h-fill { 0%, 16% { width: 11%; } 36% { width: 21%; } 100% { width: 21%; } }
+@keyframes h-tap { 0%, 24% { transform: scale(1); } 25% { transform: scale(.82); } 27%, 100% { transform: scale(1); } }
+@keyframes h-lit { 0% { transform: scale(.88); } 0.8%, 6% { transform: scale(1.07); } 7.2%, 100% { transform: scale(.88); } }
+@keyframes h-wipe { 0%, 0.8% { background-position: 100% 0; } 6%, 6.2% { background-position: 0 0; } 7.2%, 100% { background-position: 100% 0; } }
+
 </style>
 </head>
 <body>
@@ -281,7 +425,6 @@ footer a { color: var(--dim); }
     <nav>
       <a href="#try">Try it</a>
       <a href="#features">Features</a>
-      <a href="#screens">Settings</a>
       <a href="#install">Install</a>
       <a href="#faq">FAQ</a>
       <a href="https://github.com/clovr1/bloop">GitHub</a>
@@ -292,9 +435,10 @@ footer a { color: var(--dim); }
 
 <main>
 <section class="hero">
+  <span class="deco c" aria-hidden="true"></span>
   <div class="wrap">
     <div>
-      <h1>A dynamic island for your <em>Windows</em> desktop.</h1>
+      <h1><span class="w" style="--i:0">A</span> <span class="w" style="--i:1">dynamic</span> <span class="w" style="--i:2">island</span> <span class="w" style="--i:3">for</span> <span class="w" style="--i:4">your</span> <em><span class="w" style="--i:5">Windows</span></em> <span class="w" style="--i:6">desktop.</span></h1>
       <p class="lead">Bloop turns the top of your screen into a small, lively pill. Your music with synced lyrics, your notifications, Wi-Fi and Bluetooth changes, all in one place that moves like water.</p>
       <div class="cta">
         <a class="btn" href="https://github.com/clovr1/bloop/releases/latest/download/Bloop.exe" data-download>
@@ -305,12 +449,38 @@ footer a { color: var(--dim); }
       </div>
       <p class="fine"><span id="ver">Free</span> &middot; Windows 10 and 11, 64-bit &middot; one small file, no installer</p>
     </div>
-    <div class="stage" aria-label="Bloop playing music">
-      <img src="img/pill.png" alt="The small music pill at the top of the screen" width="940" height="160">
-      <img src="img/player.png" alt="The open player with cover, progress bar and controls" width="940" height="460">
+    <div class="heroart" role="img" aria-label="Bloop animation: the music pill opens into a player, then lyrics, then a notification arrives">
+      <div class="hscene">
+        <div class="hwall"></div>
+        <div class="hisl playing">
+          <div class="hl hl-play"><span class="cov"></span><span class="eq"><b></b><b></b><b></b><b></b><b></b></span></div>
+          <div class="hl hl-open">
+            <div class="hd"><span class="cov"></span><div class="tt"><b>Low Tide</b><span>Paper Boats</span></div><span class="eq"><b></b><b></b><b></b><b></b><b></b></span></div>
+            <div class="prog"><span>0:22</span><div class="bar"><i class="hfill"></i></div><span>-2:57</span></div>
+            <div class="ctl">
+              <span class="ib"><svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM20 6v12L9.5 12z"/></svg></span>
+              <span class="ib hpp"><svg width="38" height="38" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg></span>
+              <span class="ib"><svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM4 6v12l10.5-6z"/></svg></span>
+            </div>
+          </div>
+          <div class="hl hl-lyr">
+            <div class="hd"><span class="cov"></span><div class="tt"><b>Low Tide</b><span>Paper Boats</span></div></div>
+            <div class="hlines">
+              <span class="hln dim">Streetlights hum a quiet tune</span>
+              <span class="hln" style="--k:0">Every window painted blue</span>
+              <span class="hln" style="--k:1">Take the long way home with me</span>
+              <span class="hln" style="--k:2">Let the whole city fade away</span>
+            </div>
+          </div>
+          <div class="hl hl-card"><span class="hico"></span><div class="htx"><b>Budi</b><span>Are you coming tonight?</span></div></div>
+        </div>
+        <span class="hbub"><i></i></span>
+      </div>
     </div>
   </div>
 </section>
+
+<div class="ticker" aria-hidden="true"><div class="track"><span class="tp"><i style="background:#0a84ff"></i><b>Wi-Fi</b><em>On</em></span><span class="tp"><i style="background:#30d158"></i><b>JBL Flip 6</b><em>Connected</em></span><span class="tp"><i style="background:#30d158"></i><b>Charging</b><em>64%</em></span><span class="tp"><i style="background:#bf5af2"></i><b>Do Not Disturb</b><em>On</em></span><span class="tp"><i style="background:#ff9f0a"></i><b>Airplane Mode</b><em>Off</em></span><span class="tp"><i style="background:#0a84ff"></i><b>Bluetooth</b><em>On</em></span><span class="tp"><i style="background:#ffd60a"></i><b>Night Light</b><em>On</em></span><span class="tp"><i style="background:#30d158"></i><b>Energy Saver</b><em>On</em></span><span class="tp"><i style="background:#30d158"></i><b>Wireless Controller</b><em>Connected</em></span><span class="tp"><i style="background:#0a84ff"></i><b>Hotspot</b><em>On</em></span><span class="tp"><i style="background:#0a84ff"></i><b>Wi-Fi</b><em>On</em></span><span class="tp"><i style="background:#30d158"></i><b>JBL Flip 6</b><em>Connected</em></span><span class="tp"><i style="background:#30d158"></i><b>Charging</b><em>64%</em></span><span class="tp"><i style="background:#bf5af2"></i><b>Do Not Disturb</b><em>On</em></span><span class="tp"><i style="background:#ff9f0a"></i><b>Airplane Mode</b><em>Off</em></span><span class="tp"><i style="background:#0a84ff"></i><b>Bluetooth</b><em>On</em></span><span class="tp"><i style="background:#ffd60a"></i><b>Night Light</b><em>On</em></span><span class="tp"><i style="background:#30d158"></i><b>Energy Saver</b><em>On</em></span><span class="tp"><i style="background:#30d158"></i><b>Wireless Controller</b><em>Connected</em></span><span class="tp"><i style="background:#0a84ff"></i><b>Hotspot</b><em>On</em></span></div></div>
 
 <section id="features">
   <div class="wrap">
@@ -336,6 +506,7 @@ footer a { color: var(--dim); }
         <div class="wall"></div>
         <div class="win" aria-hidden="true"><div class="bar"><i></i><i></i><i></i></div><div class="body"><b></b><b></b><b></b><b></b></div></div>
         <div class="edge" id="edge"></div>
+        <button class="tourbtn" id="tourbtn" type="button"><i></i><span>Play the tour</span></button>
         <div class="iw" id="iw">
           <div class="island playing" id="isl" tabindex="0" role="button" aria-label="Bloop island. Press Enter to open or close the player." data-mode="play">
             <div class="layer l-idle"><i></i></div>
@@ -402,29 +573,28 @@ footer a { color: var(--dim); }
   </div>
 </section>
 
-<section id="screens">
-  <div class="wrap">
-    <h2>Settings that show you the result.</h2>
-    <p class="sub">The island at the top of the settings window is the real thing. Change a switch, a theme or the size and watch it react, then press Save when you like it.</p>
-    <img class="shotwin" src="img/settings-music.png" alt="The Bloop settings window on the Music page, with a live preview of the island" width="980" height="810" loading="lazy">
-    <div class="grid" style="margin-top:28px">
-      <div class="feat"><div class="dot"></div><h3>Six themes</h3><p>Colours that fade into each other when you switch.</p></div>
-      <div class="feat"><div class="dot"></div><h3>Sounds with manners</h3><p>Soft tones for notifications and status pills, silent hovering, and one switch to turn them all off.</p></div>
-      <div class="feat"><div class="dot"></div><h3>Nothing changes until Save</h3><p>Try things out in the preview first. Discard puts everything back.</p></div>
-    </div>
-  </div>
-</section>
-
 <section id="install">
   <div class="wrap">
     <h2>Up and running in a minute.</h2>
-    <p class="sub">There is nothing to install. Bloop is a single file.</p>
-    <ol class="steps">
-      <li><h3>Download</h3><p>Press <b>Download for Windows</b> and save <code>Bloop.exe</code> anywhere you like, for example your Documents folder.</p></li>
-      <li><h3>Open it</h3><p>Double-click the file. The island appears at the top of your screen and a Bloop icon appears in the tray, next to the clock.</p></li>
-      <li><h3>Make it yours</h3><p>Click the tray icon to open <b>Settings</b>. Turn on <b>Start with Windows</b> if you want it there every day.</p></li>
+    <p class="sub">There is nothing to install. Bloop is a single file. Four small steps:</p>
+    <ol class="tut">
+      <li>
+        <img src="img/tut-1-download.png" alt="The website with the orange Download for Windows button, and the downloaded file Bloop.exe" width="1000" height="620" loading="lazy">
+        <div class="tb"><span class="n">1</span><h3>Download</h3><p>Press <b>Download for Windows</b> on this page. The file <code>Bloop.exe</code> (about 2 MB) lands in your Downloads folder. You can move it anywhere you like.</p></div>
+      </li>
+      <li>
+        <img src="img/tut-2-smartscreen.png" alt="Illustration of the Windows warning: click More info, then Run anyway" width="1000" height="620" loading="lazy">
+        <div class="tb"><span class="n">2</span><h3>Open it</h3><p>Double-click <code>Bloop.exe</code>. If Windows says <b>"Windows protected your PC"</b>, it is only because the app is new and not code-signed: click <b>More info</b>, then <b>Run anyway</b>. Still blocked? Right-click the file, open <b>Properties</b> and tick <b>Unblock</b>.</p></div>
+      </li>
+      <li>
+        <img src="img/tut-3-island.png" alt="The island at the top of the screen and the Bloop icon in the tray next to the clock" width="1000" height="620" loading="lazy">
+        <div class="tb"><span class="n">3</span><h3>Say hello</h3><p>The island appears at the top of your screen and a Bloop icon next to the clock. Windows asks once whether Bloop may read your notifications. Say yes, or they will not show.</p></div>
+      </li>
+      <li>
+        <img src="img/tut-4-settings.png" alt="The Settings window, General page, with the Start with Windows switch highlighted" width="1000" height="620" loading="lazy">
+        <div class="tb"><span class="n">4</span><h3>Make it yours</h3><p>Click the tray icon to open <b>Settings</b>. On the General page, turn on <b>Start with Windows</b> if you want it there every day. To remove Bloop: <b>Quit Bloop</b> on the same page, then delete the file.</p></div>
+      </li>
     </ol>
-    <div class="note"><b>Windows says "Windows protected your PC"?</b> Bloop is a new, unsigned app, so SmartScreen is careful with it. Click <b>More info</b>, then <b>Run anyway</b>. If the file was blocked after downloading, right-click it, open <b>Properties</b> and tick <b>Unblock</b>.</div>
   </div>
 </section>
 
@@ -445,6 +615,7 @@ footer a { color: var(--dim); }
 <section>
   <div class="wrap">
     <div class="band">
+      <span class="bubs" aria-hidden="true"><i style="left:8%;width:18px;height:18px;animation-delay:0.0s;animation-duration:7.0s"></i><i style="left:22%;width:10px;height:10px;animation-delay:2.2s;animation-duration:6.0s"></i><i style="left:37%;width:26px;height:26px;animation-delay:4.1s;animation-duration:8.0s"></i><i style="left:52%;width:12px;height:12px;animation-delay:1.0s;animation-duration:6.5s"></i><i style="left:66%;width:20px;height:20px;animation-delay:3.0s;animation-duration:7.5s"></i><i style="left:80%;width:9px;height:9px;animation-delay:5.2s;animation-duration:6.0s"></i><i style="left:91%;width:16px;height:16px;animation-delay:0.6s;animation-duration:7.0s"></i></span>
       <img class="ic" src="img/icon.png" alt="" width="84" height="84">
       <h2>Give your screen a little bloop.</h2>
       <p>Free, small, and made with care. One file, no installer.</p>
@@ -709,7 +880,7 @@ footer a { color: var(--dim); }
   });
   // on a touch screen nothing "leaves", so a tap anywhere else closes the player
   document.addEventListener("click", function (e) {
-    if (!S.open || e.target.closest("#isl") || e.target.closest("#bub")) return;
+    if (!S.open || canHover || e.target.closest("#isl") || e.target.closest("#bub") || e.target.closest(".ctrls") || e.target.closest("#tourbtn")) return;
     S.open = false; render();
   });
   isl.addEventListener("keydown", function (e) {
@@ -791,6 +962,51 @@ footer a { color: var(--dim); }
   window.addEventListener("resize", fit); fit();
   function clock() { var d = new Date(); $("#clock").textContent = ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2); }
   clock(); setInterval(clock, 20000);
+
+  /* ---- an automatic tour of everything, until you touch something ---- */
+  var tourBtn = $("#tourbtn"), tourLabel = $("span", tourBtn);
+  var tour = { on: false, timer: 0, i: 0, done: false };
+  var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function press(sel) { var b = $(sel); if (b) b.click(); }
+  var TOUR = [
+    function () { press('#envs [data-env=normal]'); S.open = false; render(); return 1400; },
+    function () { S.open = true; render(); return 2400; },
+    function () { press(".l-open [data-act=lyrics]"); return 3200; },
+    function () { press("#styles [data-style=karaoke]"); return 5600; },
+    function () { S.open = false; render(); return 900; },
+    function () { press("[data-ev=notif]"); return 2200; },
+    function () { expandNotif(); return 3200; },
+    function () { press("[data-ev=device]"); return 3200; },
+    function () { press("[data-ev=wifi]"); return 2600; },
+    function () { press("[data-ev=charge]"); return 2800; },
+    function () { press('#envs [data-env=max]'); return 3000; },
+    function () { S.open = true; render(); return 2600; },
+    function () { press('#envs [data-env=normal]'); return 1600; },
+    function () { S.open = false; press("#styles [data-style=smooth]"); S.open = false; render(); return 1400; }
+  ];
+  function tourStep() {
+    if (!tour.on) return;
+    if (!visible) { tour.timer = setTimeout(tourStep, 800); return; }
+    var wait = TOUR[tour.i % TOUR.length]();
+    tour.i++;
+    tour.timer = setTimeout(tourStep, wait);
+  }
+  function setTourLabel() {
+    tourBtn.classList.toggle("on", tour.on);
+    tourLabel.textContent = tour.on ? "Touring... take over any time" : "Play the tour";
+  }
+  function startTour() { if (tour.on) return; tour.on = true; tour.done = true; setTourLabel(); tourStep(); }
+  function stopTour() { if (!tour.on) return; tour.on = false; clearTimeout(tour.timer); setTourLabel(); }
+  tourBtn.addEventListener("click", function () { if (tour.on) stopTour(); else { S.open = false; tour.i = 0; startTour(); } });
+  desk.addEventListener("pointerenter", function (e) { if (canHover && (!e.pointerType || e.pointerType === "mouse")) stopTour(); });
+  desk.addEventListener("pointerdown", stopTour);
+  $(".ctrls").addEventListener("pointerdown", stopTour);
+  document.addEventListener("keydown", function (e) { if (e.target && e.target.closest && e.target.closest("#demo")) stopTour(); });
+  if ("IntersectionObserver" in window && !reduceMotion) {
+    new IntersectionObserver(function (e, o) {
+      if (e[0].isIntersecting && !tour.done) { startTour(); o.disconnect(); }
+    }, { threshold: 0.6 }).observe(desk);
+  }
   render();
 })();
 
@@ -812,6 +1028,30 @@ footer a { color: var(--dim); }
       if (exe) document.querySelectorAll("[data-download]").forEach(function (a) { a.href = exe.browser_download_url; });
     })
     .catch(function () {});
+})();
+</script>
+<script>
+// Things rise into view as you scroll; the header gets a line once you leave the top.
+(function () {
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var top = document.querySelector("header.top");
+  function onScroll() { top.classList.toggle("scrolled", window.scrollY > 8); }
+  window.addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  if (reduce || !("IntersectionObserver" in window)) return;
+  var sel = "section h2, section .sub, .feat, ol.tut li, details, .band, .ticker, .demo .desk, .ctrls .box";
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (!e.isIntersecting) return;
+      var el = e.target; io.unobserve(el); el.classList.add("in");
+      setTimeout(function () { el.classList.remove("rv", "in"); el.style.removeProperty("--d"); }, 1700);
+    });
+  }, { threshold: 0.12, rootMargin: "0px 0px -6% 0px" });
+  var groups = new Map();
+  Array.prototype.forEach.call(document.querySelectorAll(sel), function (el) {
+    var k = groups.get(el.parentNode) || 0; groups.set(el.parentNode, k + 1);
+    el.style.setProperty("--d", (k % 4) * 90 + "ms");
+    el.classList.add("rv"); io.observe(el);
+  });
 })();
 </script>
 </body>

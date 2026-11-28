@@ -77,6 +77,8 @@ fn main() {
     ui.set_media(music(true));
     run(&mut ui, 2.0);
     shot(&mut ui, 0, 80.0).save_png(format!("{out}/pill.png")).unwrap();
+    // the island alone, on a transparent ground (for the pictures of the tutorial)
+    ui.render().save_png(format!("{out}/raw-pill.png")).unwrap();
 
     // the open player
     ui.set_cursor(Some((W / 2.0 * SCALE, (TOP + 18.0) * SCALE)));
@@ -127,7 +129,7 @@ fn main() {
     sheet.save_png(format!("{out}/status.png")).unwrap();
 
     // the settings window
-    for (page, name) in [(1u8, "settings-music"), (4, "settings-look"), (3, "settings-windows")] {
+    for (page, name) in [(0u8, "settings-general"), (1, "settings-music")] {
         let mut p = Panel::new(1.0, Settings::default(), true, (980, 810));
         p.set_page(page);
         for _ in 0..180 {
