@@ -189,6 +189,9 @@ pub struct Panel {
     /// where the wheel wants the page to be (the page eases there)
     scroll_to: f32,
     stage_valid: bool,
+    /// a slider drag: where the mouse went down and what the value was then
+    drag_x0: f32,
+    drag_v0: f32,
     /// the last picture that was shown (to send only what changed)
     shown: Vec<u8>,
     /// how "chosen" each dock button is (they swell and bounce)
@@ -342,6 +345,8 @@ impl Panel {
             stage_force: true,
             scroll_to: 0.0,
             stage_valid: false,
+            drag_x0: 0.0,
+            drag_v0: 0.0,
             shown: Vec::new(),
             dock_k: [0.0; 6],
             bg_cache: None,
@@ -1489,8 +1494,11 @@ impl Panel {
                 None
             }
             Some(id @ (Id::CardSecs | Id::Scale | Id::Speed | Id::Volume | Id::LyricsShift)) => {
+                // pressing a slider does not move it: it only starts a drag, and the value follows how far the mouse then moves
                 self.drag = Some(id);
-                self.set_slider(id, x, y)
+                self.drag_x0 = x;
+                self.drag_v0 = self.slider_value(id);
+                None
             }
             _ => None,
         }
@@ -1611,19 +1619,33 @@ impl Panel {
         Some(Act::Changed(s))
     }
 
-    fn set_slider(&mut self, id: Id, x: f32, _y: f32) -> Option<Act> {
-        let r = self.hot.iter().find(|r| r.id == id)?;
-        // the box: the mouse's place along it (a little margin at both ends so the ends can be reached)
-        let (sx, sw) = (r.x + 14.0, r.w - 28.0);
-        let frac = ((x / self.scale - sx) / sw).clamp(0.0, 1.0);
-        let (lo, hi) = match id {
+    /// The range of a slider and its value now.
+    fn slider_range(id: Id) -> (f32, f32) {
+        match id {
             Id::CardSecs => (2.0, 20.0),
             Id::Scale => (80.0, 140.0),
             Id::Volume => (0.0, 100.0),
             Id::LyricsShift => (0.0, 60.0),
             _ => (50.0, 200.0),
-        };
-        let v = (lo + frac * (hi - lo)).round() as u32;
+        }
+    }
+
+    fn slider_value(&self, id: Id) -> f32 {
+        (match id {
+            Id::CardSecs => self.s.card_secs,
+            Id::Scale => self.s.scale_pct,
+            Id::Volume => self.s.volume,
+            Id::LyricsShift => self.s.lyrics_shift,
+            _ => self.s.speed_pct,
+        }) as f32
+    }
+
+    fn set_slider(&mut self, id: Id, x: f32, _y: f32) -> Option<Act> {
+        let r = self.hot.iter().find(|r| r.id == id)?;
+        // moving the mouse the width of the box covers the whole range, starting from where the value was when the mouse went down
+        let sw = (r.w - 28.0).max(40.0);
+        let (lo, hi) = Self::slider_range(id);
+        let v = (self.drag_v0 + (x - self.drag_x0) / self.scale / sw * (hi - lo)).clamp(lo, hi).round() as u32;
         let slot = match id {
             Id::CardSecs => &mut self.s.card_secs,
             Id::Scale => &mut self.s.scale_pct,

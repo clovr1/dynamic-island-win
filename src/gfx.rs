@@ -115,6 +115,16 @@ impl Fonts {
     /// beyond them (the same soft mask the lyrics had in the Electron version).
     #[allow(clippy::too_many_arguments)]
     pub fn draw_faded(&mut self, pm: &mut Pixmap, w: Weight, text: &str, x: f32, baseline: f32, px: f32, rgb: [u8; 3], alpha: f32, window: Option<(f32, f32, f32)>) {
+        self.draw_inner(pm, w, text, x, baseline, px, rgb, alpha, window, None)
+    }
+
+    /// Like `draw_faded`, with a soft vertical edge sweeping across the text (karaoke): left of `edge` the text has the full alpha, right of it
+    /// `rest` times that, with the change spread over `soft` pixels, so the edge glides instead of jumping from letter to letter.
+    pub fn draw_sweep(&mut self, pm: &mut Pixmap, w: Weight, text: &str, x: f32, baseline: f32, px: f32, rgb: [u8; 3], alpha: f32, window: Option<(f32, f32, f32)>, edge: f32, soft: f32, rest: f32) {
+        self.draw_inner(pm, w, text, x, baseline, px, rgb, alpha, window, Some((edge, soft.max(1.0), rest)))
+    }
+
+    fn draw_inner(&mut self, pm: &mut Pixmap, w: Weight, text: &str, x: f32, baseline: f32, px: f32, rgb: [u8; 3], alpha: f32, window: Option<(f32, f32, f32)>, sweep: Option<(f32, f32, f32)>) {
         if alpha <= 0.003 {
             return;
         }
@@ -184,7 +194,14 @@ impl Fonts {
                     if light {
                         cov = boost[cov as usize];
                     }
-                    let a = cov as f32 / 255.0 * alpha * row_a;
+                    let sw = match sweep {
+                        None => 1.0,
+                        Some((edge, soft, rest)) => {
+                            let k = ((edge + soft * 0.5 - xx as f32) / soft).clamp(0.0, 1.0);
+                            rest + (1.0 - rest) * k * k * (3.0 - 2.0 * k)
+                        }
+                    };
+                    let a = cov as f32 / 255.0 * alpha * row_a * sw;
                     let i = ((y * pw + xx) * 4) as usize;
                     for k in 0..3 {
                         data[i + k] = (rgb[k] as f32 * a + data[i + k] as f32 * (1.0 - a)).round().min(255.0) as u8;

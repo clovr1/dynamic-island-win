@@ -27,17 +27,18 @@ fn pages_and_toggle() {
 fn slider_and_radio() {
     let mut p = panel();
     p.set_page(2);
-    // a box slider: the middle of the box is the middle of the range; the ends of the box are the ends of the range
+    // a box slider: pressing it does NOT move it; the value follows how far the mouse is dragged from where it went down
     let (cx, cy) = p.center_of(Id::CardSecs).expect("the slider");
-    let s = changed(p.mouse_down(cx, cy)).expect("slider");
-    let _ = p.mouse_up(cx, cy);
-    assert!(s.card_secs > 8 && s.card_secs < 14, "middle of the box: {}", s.card_secs);
-    let _ = p.mouse_down(cx, cy);
+    let before = p.s.card_secs;
+    assert!(p.mouse_down(cx, cy).is_none(), "no jump on press");
+    assert_eq!(p.s.card_secs, before);
     let _ = p.mouse_move(cx - 400.0, cy);
-    assert_eq!(p.s.card_secs, 2);
+    assert_eq!(p.s.card_secs, 2, "dragged far left");
     let _ = p.mouse_move(cx + 400.0, cy);
-    assert_eq!(p.s.card_secs, 20);
-    let _ = p.mouse_up(cx + 400.0, cy);
+    assert_eq!(p.s.card_secs, 20, "dragged far right");
+    let _ = p.mouse_move(cx, cy);
+    assert_eq!(p.s.card_secs, before, "back where it started: the same value");
+    let _ = p.mouse_up(cx, cy);
     p.set_page(3);
     let s = changed(p.press(Id::MaxOpt(2))).expect("radio option");
     assert_eq!(s.maximized, MaxMode::Normal);
@@ -71,7 +72,10 @@ fn the_preview_follows_the_settings() {
     let mut p = panel();
     p.set_page(4);
     let before = p.render().data().to_vec();
-    let s = changed(p.press(Id::Scale)).expect("size slider");
+    let (cx, cy) = p.center_of(Id::Scale).expect("size slider");
+    assert!(p.mouse_down(cx, cy).is_none());
+    let s = changed(p.mouse_move(cx + 120.0, cy)).expect("size slider");
+    let _ = p.mouse_up(cx + 120.0, cy);
     assert!(s.scale_pct != 100);
     for _ in 0..90 {
         p.tick(1.0 / 60.0);

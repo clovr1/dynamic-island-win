@@ -1314,6 +1314,10 @@ impl Ui {
         if springs || delay {
             return Need::Fast;
         }
+        // the karaoke wipe moves every frame
+        if self.lyr_view() && self.cfg.lyrics_anim == 3 && self.media.playing && self.lyr_synced && self.lyr_status == LyrStatus::Ready && self.lyr_idx >= 0 {
+            return Need::Fast;
+        }
         if self.card.is_some() || self.bubble.is_some() || !self.queue.is_empty() || self.gap > 0.0 {
             return Need::Slow;
         }
@@ -2080,15 +2084,21 @@ impl Ui {
                 let scroll = if self.lyr_synced { self.lyr_scroll.x } else { 0.0 };
                 // the animation style the user chose: 0 smooth, 1 instant, 2 focus, 3 karaoke
                 let style = (self.cfg.lyrics_anim as usize).min(3);
-                let lit_dur = [0.3, 0.1, 0.4, 0.3][style];
-                let (dim_a, dim_s, lit_s) = [(0.34, 0.93, 1.0), (0.42, 1.0, 1.0), (0.22, 0.84, 1.06), (0.34, 0.93, 1.0)][style];
-                // the lit line's progress (for the karaoke wipe): how far the song is between this line and the next
+                let lit_dur = [0.3, 0.1, 0.4, 0.45][style];
+                let (dim_a, dim_s, lit_s) = [(0.34, 0.93, 1.0), (0.42, 1.0, 1.0), (0.22, 0.84, 1.06), (0.34, 0.86, 1.07)][style];
+                // the lit line's progress (for the karaoke wipe). A synced file only gives where a line starts, not where it ends, so the time
+                // it takes to sing is estimated from its length (about 12 letters a second), and never longer than the gap to the next line:
+                // that way the wipe has finished when the singer stops, and waits through a pause before the next line.
                 let wipe = if style == 3 && self.lyr_synced && self.lyr_idx >= 0 {
                     let i = self.lyr_idx as usize;
                     let t0 = self.lyr_lines[i].t;
-                    let t1 = self.lyr_lines.get(i + 1).map(|l| l.t).unwrap_or(t0 + 4.0);
+                    let t1 = self.lyr_lines.get(i + 1).map(|l| l.t).unwrap_or(t0 + 6.0);
+                    let letters = self.lyr_lines[i].text.chars().filter(|c| !c.is_whitespace()).count() as f32;
+                    let gap = (t1 - t0).max(0.3);
+                    let est = (letters * 0.105 + 0.5).max(0.8);
+                    let sung = if gap <= est * 1.35 { gap * 0.93 } else { est.min(gap * 0.93) };
                     let pos = self.position() as f32 + 0.15 + (self.cfg.lyrics_shift as f32 - 30.0) * 0.1;
-                    ((pos - t0) / (t1 - t0).max(0.3)).clamp(0.0, 1.0)
+                    ((pos - t0) / sung).clamp(0.0, 1.0)
                 } else {
                     1.0
                 };
@@ -2118,26 +2128,11 @@ impl Ui {
                         let center = by + 5.0 + ri as f32 * lh + lh / 2.0;
                         let (rx, ry, rpx) = ((x0 + 26.0) * s, (center + 0.31 * px * sk) * s, px * sk * s);
                         if wipe_here.is_some() {
-                            // the part of this row already "sung" is bright, the rest dimmer
+                            // the part of this row already "sung" is bright, the rest dimmer, with a soft edge that moves a pixel at a time
                             let rw = self.fonts.measure(Weight::Bold, row, rpx);
-                            let mut cut = 0usize;
-                            let mut acc = 0.0f32;
-                            for (bi, ch) in row.char_indices() {
-                                let cw = self.fonts.measure(Weight::Bold, &row[bi..bi + ch.len_utf8()], rpx);
-                                if acc + cw * 0.5 > consumed {
-                                    break;
-                                }
-                                acc += cw;
-                                cut = bi + ch.len_utf8();
-                            }
-                            let (done, rest) = row.split_at(cut);
-                            if !done.is_empty() {
-                                self.fonts.draw_faded(&mut self.pm, Weight::Bold, done, rx, ry, rpx, WHITE, a, win);
-                            }
-                            if !rest.is_empty() {
-                                let dw = self.fonts.measure(Weight::Bold, done, rpx);
-                                self.fonts.draw_faded(&mut self.pm, Weight::Bold, rest, rx + dw, ry, rpx, WHITE, a * 0.42, win);
-                            }
+                            let soft = 16.0 * s;
+                            let edge = rx + consumed.min(rw) + if consumed > 0.0 && consumed < rw { 0.0 } else if consumed >= rw { soft } else { -soft };
+                            self.fonts.draw_sweep(&mut self.pm, Weight::Bold, row, rx, ry, rpx, WHITE, a, win, edge, soft, 0.42);
                             consumed = (consumed - rw).max(0.0);
                         } else {
                             self.fonts.draw_faded(&mut self.pm, Weight::Bold, row, rx, ry, rpx, WHITE, a * la, win);
