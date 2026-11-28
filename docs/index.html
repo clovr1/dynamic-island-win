@@ -7,7 +7,7 @@
 <meta name="description" content="Bloop turns the top of your Windows screen into a small, lively pill: music with synced lyrics, notifications, Wi-Fi and Bluetooth. Native, tiny, free.">
 <meta property="og:title" content="Bloop - a dynamic island for Windows">
 <meta property="og:description" content="Music, synced lyrics, notifications and status changes in a small pill at the top of your screen.">
-<meta property="og:image" content="https://clovr1.github.io/dynamic-island-win/img/social.png">
+<meta property="og:image" content="https://clovr1.github.io/bloop/img/social.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#f4eee1">
 <link rel="icon" type="image/png" href="img/favicon.png">
@@ -276,8 +276,8 @@ footer a { color: var(--dim); }
       <a href="#screens">Settings</a>
       <a href="#install">Install</a>
       <a href="#faq">FAQ</a>
-      <a href="https://github.com/clovr1/dynamic-island-win">GitHub</a>
-      <a class="btn small" href="https://github.com/clovr1/dynamic-island-win/releases/latest/download/Bloop.exe" data-download>Download</a>
+      <a href="https://github.com/clovr1/bloop">GitHub</a>
+      <a class="btn small" href="https://github.com/clovr1/bloop/releases/latest/download/Bloop.exe" data-download>Download</a>
     </nav>
   </div>
 </header>
@@ -289,11 +289,11 @@ footer a { color: var(--dim); }
       <h1>A dynamic island for your <em>Windows</em> desktop.</h1>
       <p class="lead">Bloop turns the top of your screen into a small, lively pill. Your music with synced lyrics, your notifications, Wi-Fi and Bluetooth changes, all in one place that moves like water.</p>
       <div class="cta">
-        <a class="btn" href="https://github.com/clovr1/dynamic-island-win/releases/latest/download/Bloop.exe" data-download>
+        <a class="btn" href="https://github.com/clovr1/bloop/releases/latest/download/Bloop.exe" data-download>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg>
           Download for Windows
         </a>
-        <a class="btn ghost" href="https://github.com/clovr1/dynamic-island-win">View on GitHub</a>
+        <a class="btn ghost" href="https://github.com/clovr1/bloop">View on GitHub</a>
       </div>
       <p class="fine"><span id="ver">Free</span> &middot; Windows 10 and 11, 64-bit &middot; one small file, no installer</p>
     </div>
@@ -441,8 +441,8 @@ footer a { color: var(--dim); }
       <h2>Give your screen a little bloop.</h2>
       <p>Free, small, and made with care. One file, no installer.</p>
       <div class="cta" style="justify-content:center">
-        <a class="btn" href="https://github.com/clovr1/dynamic-island-win/releases/latest/download/Bloop.exe" data-download>Download for Windows</a>
-        <a class="btn ghost" href="https://github.com/clovr1/dynamic-island-win/releases">All versions</a>
+        <a class="btn" href="https://github.com/clovr1/bloop/releases/latest/download/Bloop.exe" data-download>Download for Windows</a>
+        <a class="btn ghost" href="https://github.com/clovr1/bloop/releases">All versions</a>
       </div>
     </div>
   </div>
@@ -452,7 +452,7 @@ footer a { color: var(--dim); }
 <footer>
   <div class="wrap">
     <span>Bloop &middot; made by <a href="https://github.com/clovr1">clovr1</a></span>
-    <span><a href="https://github.com/clovr1/dynamic-island-win">Source on GitHub</a> &middot; <a href="https://github.com/clovr1/dynamic-island-win/issues">Report a problem</a> &middot; Lyrics by <a href="https://lrclib.net">LRCLIB</a></span>
+    <span><a href="https://github.com/clovr1/bloop">Source on GitHub</a> &middot; <a href="https://github.com/clovr1/bloop/issues">Report a problem</a> &middot; Lyrics by <a href="https://lrclib.net">LRCLIB</a></span>
   </div>
 </footer>
 
@@ -790,7 +790,7 @@ footer a { color: var(--dim); }
 <script>
 // Show the newest version number, and point the buttons at the file of the newest release.
 (function () {
-  var repo = "clovr1/dynamic-island-win";
+  var repo = "clovr1/bloop";
   fetch("https://api.github.com/repos/" + repo + "/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (j) {

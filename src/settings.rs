@@ -69,7 +69,7 @@ impl Default for Settings {
             speed_pct: 100,
             accent_eq: true,
             check_updates: true,
-            update_repo: "clovr1/dynamic-island-win".to_string(),
+            update_repo: "clovr1/bloop".to_string(),
             theme: 0,
             status_pills: true,
             dnd_quiet: true,

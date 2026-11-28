@@ -10,9 +10,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/clovr1/dynamic-island-win/releases/latest/download/Bloop.exe"><b>Download Bloop.exe</b></a>
+  <a href="https://github.com/clovr1/bloop/releases/latest/download/Bloop.exe"><b>Download Bloop.exe</b></a>
   &nbsp;·&nbsp;
-  <a href="https://clovr1.github.io/dynamic-island-win/">Website with a live demo</a>
+  <a href="https://clovr1.github.io/bloop/">Website with a live demo</a>
   &nbsp;·&nbsp;
   <a href="CHANGELOG.md">Changelog</a>
 </p>
@@ -21,7 +21,7 @@
   <img alt="Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4">
   <img alt="Rust" src="https://img.shields.io/badge/made%20with-Rust-dea584">
   <img alt="No web engine" src="https://img.shields.io/badge/web%20engine-none-ff5c28">
-  <a href="https://github.com/clovr1/dynamic-island-win/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/clovr1/dynamic-island-win?label=release"></a>
+  <a href="https://github.com/clovr1/bloop/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/clovr1/bloop?label=release"></a>
 </p>
 
 ---
@@ -48,7 +48,7 @@ changes until you press Save.
 
 ## Install
 
-1. Download [`Bloop.exe`](https://github.com/clovr1/dynamic-island-win/releases/latest/download/Bloop.exe) and open it.
+1. Download [`Bloop.exe`](https://github.com/clovr1/bloop/releases/latest/download/Bloop.exe) and open it.
    There is no installer. If Windows SmartScreen warns you ("Windows protected your PC"), click **More info → Run anyway**:
    the program is new and not code-signed.
 2. Windows asks once whether Bloop may read your notifications. Allow it, or notifications will not show.
