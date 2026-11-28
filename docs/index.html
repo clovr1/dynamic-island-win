@@ -426,11 +426,13 @@ html.theming, html.theming * { transition: background-color .6s ease, color .6s 
 ol.news { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; position: relative; }
 @media (max-width: 960px) { ol.news { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { ol.news { grid-template-columns: minmax(0, 1fr); } }
-ol.news li { background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 20px 22px 24px; position: relative; transition: transform .35s cubic-bezier(.3,1.5,.5,1), box-shadow .3s ease; }
-ol.news li:hover { transform: translateY(-5px); box-shadow: 0 22px 30px -22px rgba(0,0,0,.45); }
+ol.news > li { background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 20px 22px 24px; position: relative; transition: transform .35s cubic-bezier(.3,1.5,.5,1), box-shadow .3s ease; }
+ol.news > li:hover { transform: translateY(-5px); box-shadow: 0 22px 30px -22px rgba(0,0,0,.45); }
 ol.news .ver { display: inline-block; font-weight: 800; font-size: 14px; letter-spacing: .02em; color: var(--orange-ink); background: var(--orange); border-radius: 999px; padding: 4px 12px; margin-bottom: 14px; }
-ol.news li.is-latest .ver::after { content: " · latest"; font-weight: 600; opacity: .85; }
-ol.news li.hide { display: none; }
+ol.news > li.is-latest .ver::after { content: " · latest"; font-weight: 600; opacity: .85; }
+ol.news ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+ol.news li b { display: block; font-size: 16px; letter-spacing: -.01em; margin-bottom: 2px; }
+ol.news li span.t { color: var(--dim); font-size: 15px; display: block; }
 ol.news h3 { margin: 0 0 6px; font-size: 19px; letter-spacing: -.01em; }
 ol.news p { margin: 0; color: var(--dim); font-size: 15.5px; }
 @keyframes blink { 0%, 90%, 100% { transform: scaleY(1); } 94% { transform: scaleY(.15); } }
@@ -445,7 +447,7 @@ ol.news p { margin: 0; color: var(--dim); font-size: 15.5px; }
     <nav>
       <a href="#try">Try it</a>
       <a href="#features">Features</a>
-      <a href="#new">What's new</a>
+      <a href="#new" id="newlink" hidden>What's new</a>
       <a href="#install">Install</a>
       <a href="#faq">FAQ</a>
       <a class="btn small" href="https://github.com/clovr1/bloop/releases/latest/download/Bloop.exe" data-download>Download</a>
@@ -517,18 +519,11 @@ ol.news p { margin: 0; color: var(--dim); font-size: 15.5px; }
   </div>
 </section>
 
-<section id="new">
+<section id="new" hidden>
   <div class="wrap">
     <h2>What's new.</h2>
     <p class="sub">Bloop gets a little better every few weeks. Updates arrive by themselves.</p>
-    <ol class="news" id="news">
-      <li data-ver="0.25"><span class="ver">0.25</span><h3>Who is listening, what is arriving</h3><p>A dot beside the island while a program uses your microphone or camera, and a pill with the file name and size while a download runs.</p></li>
-      <li data-ver="0.24"><span class="ver">0.24</span><h3>A pill for copying, and a face</h3><p>A small "Copied" pill when you copy something (never what was copied). While nothing plays, the resting pill has a little face whose eyes follow your mouse, and that blinks and smiles.</p></li>
-      <li data-ver="0.23"><span class="ver">0.23</span><h3>A new face</h3><p>A new app icon, a tidier Updates page, and lyrics that line up with the song out of the box.</p></li>
-      <li data-ver="0.22"><span class="ver">0.22</span><h3>Karaoke lyrics</h3><p>The words light up as they are sung, with a soft glide. The line being sung grows. Sliders follow your drag instead of jumping.</p></li>
-      <li data-ver="0.21"><span class="ver">0.21</span><h3>Floating devices</h3><p>A connected speaker or earbuds float in with a soft glow, like on the iPhone. Crisper lettering, and smarter full-screen detection.</p></li>
-      <li data-ver="0.20"><span class="ver">0.20</span><h3>Bluetooth and quiet pop-ups</h3><p>A pill with the device's picture when it connects. Notifications go to the island only, not twice.</p></li>
-    </ol>
+    <ol class="news" id="news"></ol>
   </div>
 </section>
 
@@ -1057,38 +1052,68 @@ ol.news p { margin: 0; color: var(--dim); font-size: 15.5px; }
 
 </script>
 <script>
-// Show the newest version number, and point the buttons at the file of the newest release.
+// The version and the download button follow the newest release on GitHub; "What's new" shows what the newest releases say about themselves.
 (function () {
   var repo = "clovr1/bloop";
-  fetch("https://api.github.com/repos/" + repo + "/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
+  fetch("https://api.github.com/repos/" + repo + "/releases?per_page=6", { headers: { Accept: "application/vnd.github+json" } })
     .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (j) {
-      showNews(j && j.tag_name ? j.tag_name : null);
-      if (!j) return;
+    .then(function (list) {
+      if (!list || !list.length) return;
+      var j = list[0];
       var exe = (j.assets || []).filter(function (a) { return /\.exe$/i.test(a.name); })[0];
       var ver = document.getElementById("ver");
       if (ver && j.tag_name) {
         var mb = exe ? " (" + (exe.size / 1048576).toFixed(1) + " MB)" : "";
-        ver.textContent = "Version " + j.tag_name.replace(/^v/, "") + mb;
+        ver.textContent = "Version " + j.tag_name.replace(/^v/i, "") + mb;
       }
       if (exe) document.querySelectorAll("[data-download]").forEach(function (a) { a.href = exe.browser_download_url; });
+      showNews(list);
     })
-    .catch(function () { showNews(null); });
-  // "What's new" lists the versions that have a release on GitHub (the newest four), and marks the newest. Without a reply it shows
-  // the first four and marks none.
-  function showNews(tag) {
-    var items = Array.prototype.slice.call(document.querySelectorAll("#news li"));
-    var num = function (v) { var m = /(\d+)\.(\d+)/.exec(v); return m ? [+m[1], +m[2]] : [0, 0]; };
-    var released = tag ? num(tag) : null;
-    var shown = 0;
-    items.forEach(function (li) {
-      var v = num(li.getAttribute("data-ver"));
-      var ok = !released || v[0] < released[0] || (v[0] === released[0] && v[1] <= released[1]);
-      li.classList.remove("is-latest", "hide");
-      if (!ok || shown >= 4) { li.classList.add("hide"); return; }
-      if (shown === 0 && released) li.classList.add("is-latest");
-      shown++;
+    .catch(function () {});
+
+  // The notes of a release are bullets that start with a bold title: "- **Copied pill:** a small pill when you copy ...".
+  function parseNotes(body) {
+    var items = [], cur = null;
+    String(body || "").replace(/<!--[\s\S]*?-->/g, "").split(/\r?\n/).forEach(function (line) {
+      var m = /^\s*[-*]\s+\*\*(.+?)\*\*:?\s*(.*)$/.exec(line);
+      if (m) { cur = { title: m[1].replace(/:$/, ""), text: m[2] }; items.push(cur); }
+      else if (cur && /^\s+\S/.test(line)) cur.text += " " + line.trim();
+      else cur = null;
     });
+    return items.map(function (it) {
+      var t = it.text.replace(/[*`_]/g, "").replace(/\[(.*?)\]\(.*?\)/g, "$1").trim();
+      var dot = t.search(/[.!?](\s|$)/);
+      if (dot > 0 && dot < 160) t = t.slice(0, dot + 1);
+      else if (t.length > 150) t = t.slice(0, 147).replace(/\s+\S*$/, "") + "...";
+      return { title: it.title, text: t.charAt(0).toUpperCase() + t.slice(1) };
+    });
+  }
+
+  function showNews(list) {
+    var ol = document.getElementById("news");
+    if (!ol) return;
+    ol.textContent = "";
+    list.slice(0, 4).forEach(function (r, i) {
+      var li = document.createElement("li");
+      if (i === 0) li.className = "is-latest";
+      var v = document.createElement("span");
+      v.className = "ver"; v.textContent = String(r.tag_name || "").replace(/^v/i, "");
+      li.appendChild(v);
+      var items = parseNotes(r.body).slice(0, 3);
+      if (!items.length) items = [{ title: "A new version", text: "Small improvements and fixes." }];
+      var ul = document.createElement("ul");
+      items.forEach(function (it) {
+        var row = document.createElement("li"), b = document.createElement("b"), t = document.createElement("span");
+        b.textContent = it.title; t.className = "t"; t.textContent = it.text;
+        row.appendChild(b); if (it.text) row.appendChild(t);
+        ul.appendChild(row);
+      });
+      li.appendChild(ul);
+      ol.appendChild(li);
+    });
+    document.getElementById("new").hidden = false;
+    var link = document.getElementById("newlink");
+    if (link) link.hidden = false;
   }
 })();
 </script>

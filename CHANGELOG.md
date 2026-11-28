@@ -1,24 +1,20 @@
 # Changelog
 
-All notable changes to Bloop. Newest first. Versions are the tags of the GitHub releases.
+All notable changes to Bloop. Newest first. A version is released when its tag is pushed to GitHub: that is decided by hand, so what is made in between is collected under *Unreleased*.
 
-## 0.25.1 - eyes that follow
-- The little face's eyes follow your mouse wherever it is on the screen (and look up or down too). A moving mouse also wakes the face
-  when it has nodded off. While it sleeps the island only looks at the mouse about twice a second.
-
-## 0.25.0 - who is listening, what is arriving
-- **Microphone and camera dot:** a small dot beside the island (orange: microphone, green: camera) while a program uses them, and a pill
-  with the program's name when one starts. It reads the list Windows keeps for its own privacy settings. Settings → Notifications.
-- **Download pill:** while a browser downloads a file into your Downloads folder (Chrome, Edge, Firefox, Opera ...), a pill shows its name
-  and size so far, with a light running along a track (the total size is not known, so there is no percentage), and says *Downloaded* when
-  it is done. A message always takes over the island at once. Settings → Notifications.
-
-## 0.24.0 - a pill for copying, and a face
-- **Copied pill:** when you copy something, a small pill says *Copied* and what kind of thing it was (Text, Image or Files). It never
-  shows or stores what was copied, and it stays quiet when the program asks not to be recorded (password managers do).
-  Settings → Notifications → *Copied pill*.
-- **Pill face:** while nothing is playing the resting pill has a little face made of pills. It blinks, glances around, smiles for a moment
-  after a notification and nods off after a minute and a half of quiet (then nothing runs at all). Settings → Look → *Pill face*.
+## Unreleased
+<!-- Collected here as things are made. When a version is released (a tag such as v0.24.0 is pushed), the release workflow uses this section
+as the notes of the release, and the website's "What's new" shows them. Afterwards give the section its version number as heading. -->
+- **Copied pill:** when you copy something, a small pill says *Copied* and what kind of thing it was (Text, Image or Files). It never shows
+  or stores what was copied, and it stays quiet when the program asks not to be recorded (password managers do). Settings → Notifications.
+- **Pill face:** while nothing is playing the resting pill has a little face made of pills. Its eyes follow your mouse wherever it is on the
+  screen, it blinks, smiles for a moment after a notification and nods off after a minute and a half of quiet (a moving mouse wakes it).
+  Settings → Look.
+- **Microphone and camera dot:** a small dot beside the island (orange: microphone, green: camera) while a program uses them, and a pill with
+  the program's name when one starts. It reads the list Windows keeps for its own privacy settings. Settings → Notifications.
+- **Download pill:** while a browser downloads a file into your Downloads folder, a pill shows its name and size so far, with a light running
+  along a track (the total size is not known, so there is no percentage), and says *Downloaded* when it is done. A message always takes over
+  the island at once. Settings → Notifications.
 
 ## 0.23.x
 - **0.23.2** The Updates page is tidier: the switch, then the version with *Check now*. Added the website (`docs/`) and the developer-only

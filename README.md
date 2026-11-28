@@ -87,8 +87,11 @@ How the code is organised: [ARCHITECTURE.md](ARCHITECTURE.md). How to contribute
 
 ### Releases
 
-Push a tag such as `v0.23.2`. The workflow in [`.github/workflows/release.yml`](.github/workflows/release.yml) builds `Bloop.exe`
-on Windows and attaches it to the release. Installed copies pick it up from there.
+Whether and when to release is decided by hand: push a tag such as `v0.24.0` when you want one. The workflow in
+[`.github/workflows/release.yml`](.github/workflows/release.yml) builds `Bloop.exe` on Windows, puts the tag's version into it, and attaches it
+to the release. The notes of the release are the *Unreleased* section of [CHANGELOG.md](CHANGELOG.md), which is also what the website's
+"What's new" shows. Installed copies pick the release up from there. (The version in `Cargo.toml` is only that of the last release; the tag
+is what counts.)
 
 ### The website
 
