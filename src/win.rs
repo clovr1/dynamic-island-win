@@ -320,7 +320,9 @@ impl App {
     }
 
     fn test_notification(&mut self) {
-        self.ui.push_notification(crate::ui::NotifData {
+        let (dnd, respect) = self.ui.dnd_state();
+        log(&format!("test notification (Windows Do Not Disturb: {}, the island respects it: {} - a test is shown anyway)", if dnd { "on" } else { "off" }, if respect { "yes" } else { "no" }));
+        self.ui.push_test_notification(crate::ui::NotifData {
             app: "Bloop".into(),
             aumid: String::new(),
             title: "Test notification".into(),

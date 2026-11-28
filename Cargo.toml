@@ -1,6 +1,6 @@
 [package]
 name = "island"
-version = "0.19.2"
+version = "0.19.3"
 edition = "2021"
 description = "Bloop: a small native dynamic island for Windows (no web engine)"
 

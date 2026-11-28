@@ -302,6 +302,8 @@ pub struct Ui {
     /// the notification list of the home view (newest first)
     log: Vec<LogEntry>,
     dnd: bool,
+    /// the notification being pushed is a test: it is shown whatever Do Not Disturb says
+    test_note: bool,
     sys_last: Vec<(String, bool, Instant)>,
     status_since: f32,
     /// the date and time shown in the home view (set by the window)
@@ -495,6 +497,7 @@ impl Ui {
             queue: VecDeque::new(),
             log: Vec::new(),
             dnd: false,
+            test_note: false,
             sys_last: Vec::new(),
             status_since: 0.0,
             clock: String::new(),
@@ -765,6 +768,13 @@ impl Ui {
         self.media.playing = !self.media.playing;
     }
 
+    /// A test notification (the "Show a test notification" button): it is shown even while Do Not Disturb is on, since it only tests the look.
+    pub fn push_test_notification(&mut self, d: NotifData) {
+        self.test_note = true;
+        self.push_notification(d);
+        self.test_note = false;
+    }
+
     /// Do Not Disturb switched on / off: while it is on, notifications only go to the list.
     pub fn set_dnd(&mut self, on: bool) {
         self.dnd = on;
@@ -949,7 +959,7 @@ impl Ui {
         // the list in the home view keeps everything (also what Do Not Disturb kept quiet)
         self.log.insert(0, LogEntry { n: n.clone(), at: Instant::now() });
         self.log.truncate(8);
-        if self.dnd && self.cfg.dnd_quiet {
+        if self.dnd && self.cfg.dnd_quiet && !self.test_note {
             return;
         }
         // while music plays in the small pill: a small bubble beside it. Otherwise: a card.

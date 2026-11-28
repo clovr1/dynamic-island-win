@@ -126,3 +126,29 @@ fn sounds_are_asked_for() {
     ui.play_sound(Sound::Skip);
     assert_eq!(ui.take_sounds(), vec![Sound::Skip]);
 }
+
+#[test]
+fn a_test_notification_ignores_do_not_disturb_but_real_ones_do_not() {
+    let mut ui = ui();
+    ui.set_dnd(true);
+    ui.push_notification(note("Messages", "Alex"));
+    run(&mut ui, 0.5);
+    assert_ne!(ui.mode(), Mode::Card, "a real one is kept quiet");
+    ui.push_test_notification(note("Bloop", "Test"));
+    run(&mut ui, 0.5);
+    assert_eq!(ui.mode(), Mode::Card, "the test is shown");
+    // with "Respect Do Not Disturb" off, real notifications show too
+    let mut ui = ui_with_respect(false);
+    ui.set_dnd(true);
+    ui.push_notification(note("Messages", "Alex"));
+    run(&mut ui, 0.5);
+    assert_eq!(ui.mode(), Mode::Card);
+}
+
+fn ui_with_respect(respect: bool) -> Ui {
+    let mut u = Ui::new(1.0);
+    let mut s = Settings::default();
+    s.dnd_quiet = respect;
+    u.set_settings(&s);
+    u
+}
