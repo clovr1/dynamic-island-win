@@ -8,8 +8,10 @@ as the notes of the release, and the website's "What's new" shows them. Afterwar
 - **Copied pill:** when you copy something, a small pill says *Copied* and what kind of thing it was (Text, Image or Files). It never shows
   or stores what was copied, and it stays quiet when the program asks not to be recorded (password managers do). Settings → Notifications.
 - **Pill face:** while nothing is playing the resting pill has a little face made of pills. Its eyes follow your mouse wherever it is on the
-  screen, it blinks, smiles for a moment after a notification and nods off after a minute and a half of quiet (a moving mouse wakes it).
-  Settings → Look.
+  screen: they turn like springs (quickly, with a little overshoot), the nearer eye turns a bit further, they widen when the mouse is close and
+  squint when it is below, and they blink in surprise when it flies across the screen. Held still for a few seconds, the mouse loses them and
+  they look around by themselves again. The face blinks, smiles for a moment after a notification and nods off after a minute and a half of
+  quiet (a moving mouse wakes it). Settings → Look.
 - **Microphone and camera dot:** a small dot beside the island (orange: microphone, green: camera) while a program uses them, and a pill with
   the program's name when one starts. It reads the list Windows keeps for its own privacy settings. Settings → Notifications.
 - **Download pill:** while a browser downloads a file into your Downloads folder, a pill shows its name and size so far, with a light running

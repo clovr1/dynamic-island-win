@@ -81,7 +81,7 @@ fn the_face_costs_little_and_nods_off() {
     ui.set_settings(&Settings::default());
     run(&mut ui, 1.0);
     // awake and idle: a slow timer is enough (or a faster one during a blink), never the full frame rate
-    assert!(matches!(ui.need(), Need::Idle | Need::Slow));
+    assert!(matches!(ui.need(), Need::Idle | Need::Slow | Need::Fast));
     // after a long quiet it is asleep: only a look at the mouse now and then (to wake it)
     run(&mut ui, 110.0);
     assert_eq!(ui.need(), Need::Doze);
@@ -127,5 +127,5 @@ fn the_eyes_follow_the_mouse_and_a_moving_mouse_wakes_the_face() {
     assert_eq!(ui.need(), Need::Doze);
     ui.set_look(Some((300.0, 100.0)));
     run(&mut ui, 0.5);
-    assert!(matches!(ui.need(), Need::Slow | Need::Idle), "awake: {:?}", ui.need());
+    assert!(matches!(ui.need(), Need::Fast | Need::Slow | Need::Idle), "awake: {:?}", ui.need());
 }

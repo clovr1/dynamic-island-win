@@ -177,7 +177,7 @@ impl App {
                     SetTimer(self.hwnd, TIMER_ID, 33, None);
                 }
                 Need::Idle => {
-                    SetTimer(self.hwnd, TIMER_ID, 100, None);
+                    SetTimer(self.hwnd, TIMER_ID, 50, None);
                 }
                 Need::Doze => {
                     SetTimer(self.hwnd, TIMER_ID, 400, None);
@@ -239,8 +239,12 @@ impl App {
         } else {
             self.ui.set_look(None);
         }
+        let was_quiet = matches!(self.timer, Need::Idle | Need::Doze);
         let need = self.ui.tick(dt);
-        self.present();
+        // while only the face is awake the island is looked at often but drawn only when something moves
+        if !(was_quiet && matches!(need, Need::Idle | Need::Doze)) {
+            self.present();
+        }
         self.set_timer(need);
     }
 

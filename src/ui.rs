@@ -341,6 +341,11 @@ pub struct Ui {
     look_target: Option<(f32, f32)>,
     look_prev: (f32, f32),
     face_look: (f32, f32),
+    face_vel: (f32, f32),
+    /// how near the mouse is (0..1, smoothed), when the mouse last moved, and when it last jumped far (a startle)
+    face_near: f32,
+    look_moved_at: f32,
+    face_startle: f32,
     /// who uses the microphone / camera now, which dots to draw (kept while the dot fades out), and the dot's entrance
     privacy: (Option<String>, Option<String>),
     privacy_shown: (bool, bool),
@@ -546,6 +551,10 @@ impl Ui {
             look_target: None,
             look_prev: (0.0, 0.0),
             face_look: (0.0, 0.0),
+            face_vel: (0.0, 0.0),
+            face_near: 0.0,
+            look_moved_at: -100.0,
+            face_startle: -100.0,
             privacy: (None, None),
             privacy_shown: (false, false),
             privacy_k: Tween::new(0.0),
@@ -1340,11 +1349,21 @@ impl Ui {
         if over_pill || has_card || !self.queue.is_empty() || self.media.active || self.open {
             self.face_poke = self.t_real;
         }
-        // the eyes follow the mouse
+        // the eyes follow the mouse: each one is a slightly bouncy spring, so they turn quickly and settle with a little overshoot
         let (gx, gy) = self.look_goal();
-        let k = 1.0 - (-dt * 14.0).exp();
-        self.face_look.0 += (gx - self.face_look.0) * k;
-        self.face_look.1 += (gy - self.face_look.1) * k;
+        let mut left = dt.min(0.1);
+        while left > 0.0 {
+            let h = left.min(1.0 / 120.0);
+            left -= h;
+            let ax = (gx - self.face_look.0) * 300.0 - self.face_vel.0 * 24.0;
+            let ay = (gy - self.face_look.1) * 300.0 - self.face_vel.1 * 24.0;
+            self.face_vel.0 += ax * h;
+            self.face_vel.1 += ay * h;
+            self.face_look.0 += self.face_vel.0 * h;
+            self.face_look.1 += self.face_vel.1 * h;
+        }
+        let near = self.near_goal();
+        self.face_near += (near - self.face_near) * (1.0 - (-dt * 6.0).exp());
         // while a card is up and the mouse is on it, the player must not pop open when the card ends
         if self.card.is_some() && over_pill {
             self.open_block = true;
@@ -1451,7 +1470,9 @@ impl Ui {
             return Need::Slow;
         }
         if self.face_visible() {
-            return if self.face_busy() {
+            return if self.face_turning() {
+                Need::Fast
+            } else if self.face_busy() {
                 Need::Slow
             } else if self.face_sleepy() >= 0.999 {
                 Need::Doze
@@ -1516,7 +1537,8 @@ impl Ui {
         let glance = (t + 0.12) % FACE_GLANCE_EVERY;
         let sleepy = self.face_sleepy();
         let (gx, gy) = self.look_goal();
-        let turning = (gx - self.face_look.0).abs() > 0.01 || (gy - self.face_look.1).abs() > 0.01;
+        let turning = self.face_turning();
+        let _ = (gx, gy);
         // fast asleep: no blinks, no glances, only a smile or eyes still turning
         if sleepy >= 0.999 {
             return self.face_happy > 0.0 || turning;
@@ -1532,6 +1554,20 @@ impl Ui {
         }
     }
 
+    /// How close the mouse is to the island: 1 right there .. 0 far away.
+    fn near_goal(&self) -> f32 {
+        match self.look_target {
+            Some((dx, dy)) => smooth(1.0 - (dx.hypot(dy) / 240.0).min(1.0)),
+            None => 0.0,
+        }
+    }
+
+    /// Are the eyes still turning (or is something else about them still changing)?
+    fn face_turning(&self) -> bool {
+        let (gx, gy) = self.look_goal();
+        (gx - self.face_look.0).abs() > 0.004 || (gy - self.face_look.1).abs() > 0.004 || self.face_vel.0.abs() > 0.02 || self.face_vel.1.abs() > 0.02 || (self.near_goal() - self.face_near).abs() > 0.01 || self.t_real - self.face_startle < 0.45
+    }
+
     /// Does the face want to know where the mouse is (the window asks Windows for it)?
     pub fn face_follows(&self) -> bool {
         self.face_visible()
@@ -1541,39 +1577,47 @@ impl Ui {
     pub fn set_look(&mut self, p: Option<(f32, f32)>) {
         if let Some((x, y)) = p {
             // a moving mouse is somebody there: it wakes the face
-            if (x - self.look_prev.0).abs() + (y - self.look_prev.1).abs() > 8.0 {
+            let moved = (x - self.look_prev.0).abs() + (y - self.look_prev.1).abs();
+            if moved > 8.0 {
                 self.face_poke = self.t_real;
+                self.look_moved_at = self.t_real;
+                // the mouse flew far in no time: a startled blink
+                if moved > 320.0 && self.look_target.is_some() && self.t_real - self.face_startle > 2.0 {
+                    self.face_startle = self.t_real;
+                }
                 self.look_prev = (x, y);
             }
         }
         self.look_target = p;
     }
 
-    /// How open the eyes are (0..1) and which way they look (-1 left .. 1 right).
+    /// How open the eyes are (0..1) and which way they look (-1 left .. 1 right): towards the mouse while it moves; when it has been still for a
+    /// few seconds the eyes wander again on their own.
     fn face_eyes(&self) -> (f32, f32) {
         let t = self.t_real;
         let sleepy = self.face_sleepy();
-        // a blink: a quick close and open; every third time twice
+        // a blink: a quick close and open; every third time twice; and a startled one when the mouse flies far
         let tri = |x: f32| if (0.0..0.2).contains(&x) { 1.0 - (x / 0.1 - 1.0).abs() } else { 0.0 };
         let ph = t % FACE_BLINK_EVERY;
         let mut closed = tri(ph);
         if ((t / FACE_BLINK_EVERY) as u32) % 3 == 2 {
             closed = closed.max(tri(ph - 0.34));
         }
+        closed = closed.max(tri(t - self.face_startle - 0.04));
         let open = lerp(1.0 - closed, 0.16, sleepy);
         // a glance now and then, to one side and back
         const LOOK: [f32; 10] = [0.0, -1.0, 0.0, 0.8, 0.0, 0.0, -0.6, 0.0, 1.0, 0.0];
         let seg = (t / FACE_GLANCE_EVERY) as usize;
         let (prev, next) = (LOOK[(seg + LOOK.len() - 1) % LOOK.len()], LOOK[seg % LOOK.len()]);
-        let e = smooth((t % FACE_GLANCE_EVERY) / 0.2);
-        // looking at the mouse wins over a glance of its own
-        if self.look_target.is_some() {
-            return (open, self.face_look.0 * (1.0 - sleepy));
-        }
-        (open, lerp(prev, next, e) * (1.0 - sleepy))
+        let glance = lerp(prev, next, smooth((t % FACE_GLANCE_EVERY) / 0.2));
+        // how much the mouse still holds the eyes: fully while it moves, not at all after a few seconds of stillness
+        let hold = if self.look_target.is_some() { 1.0 - smooth((t - self.look_moved_at - 5.0) / 1.2) } else { 0.0 };
+        (open, lerp(glance, self.face_look.0, hold) * (1.0 - sleepy))
     }
 
-    /// Two pill-shaped eyes; after a notification it smiles (the eyes turn into little arches and a smile appears).
+    /// Two pill-shaped eyes that turn towards the mouse (the one on the side it looks to turns a little further, as in a real turn of the head),
+    /// get bigger when the mouse is close, and squint when it is below them; for a moment after a notification or a pill it smiles (the eyes turn
+    /// into little arches and a smile appears).
     fn draw_face(&mut self, x0: f32, y0: f32, w: f32, h: f32) {
         let s = self.scale;
         let a = smooth((w - 96.0) / 20.0) * smooth((h - 30.0) / 6.0) * clamp01(1.0 - self.content.x * 2.0);
@@ -1581,12 +1625,18 @@ impl Ui {
             return;
         }
         let (open, look) = self.face_eyes();
+        let hold = if self.look_target.is_some() { 1.0 - smooth((self.t_real - self.look_moved_at - 5.0) / 1.2) } else { 0.0 };
+        let vy = self.face_look.1 * hold * (1.0 - self.face_sleepy());
+        let near = self.face_near * hold;
         let happy = self.face_happy;
         let (cx, cy) = (x0 + w / 2.0, y0 + h / 2.0 - 2.0 * happy);
-        let (ew, eh) = (5.6, lerp(2.6, 12.5, open));
+        let ew = 5.6 + 0.9 * near;
+        // looking up opens the eyes a little wider, looking down squints them
+        let eh = lerp(2.6, 12.5 + 1.6 * near, open) * (1.0 + 0.07 * (-vy).max(0.0) - 0.16 * vy.max(0.0));
+        let sign = if look >= 0.0 { 1.0f32 } else { -1.0 };
         for side in [-1.0f32, 1.0] {
-            let ex = cx + side * 9.5 + look * 4.8;
-            let ey = cy + self.face_look.1 * 2.2 * (1.0 - self.face_sleepy());
+            let ex = cx + side * (9.5 + 0.8 * near) + look * (6.0 + 1.8 * side * sign);
+            let ey = cy + vy * 3.0;
             gfx::fill_rrect(&mut self.pm, (ex - ew / 2.0) * s, (ey - eh / 2.0) * s, ew * s, eh * s, [ew / 2.0 * s; 4], WHITE, a * (1.0 - happy));
         }
         if happy > 0.01 {
