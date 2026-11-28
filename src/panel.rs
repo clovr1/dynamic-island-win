@@ -5,7 +5,7 @@ use crate::gfx::{fill_rrect, Fonts, Weight};
 use crate::settings::{MaxMode, Settings};
 use crate::lyrics::{parse_lrc, Found};
 use crate::ui::{ArtData, Env, Hit, MediaInfo, Need, NotifData, Ui};
-use tiny_skia::{Color, GradientStop, LinearGradient, Mask, Paint, Pixmap, PixmapPaint, Point, SpreadMode, Transform};
+use tiny_skia::{Color, GradientStop, LinearGradient, Mask, Paint, PathBuilder, Pixmap, Point, RadialGradient, SpreadMode, Transform};
 
 /// width of the list of pages (logical pixels)
 const SIDE: f32 = 224.0;
@@ -179,6 +179,9 @@ pub struct Panel {
     burst: f32,
     /// the live island needs to be drawn again
     stage_force: bool,
+    /// how "chosen" each dock button is (they swell and bounce)
+    dock_k: [f32; 6],
+    bg_cache: Option<((u32, u32, u8, u8), Pixmap)>,
 }
 
 /// A ripple that spreads from where a row or button was pressed.
@@ -187,6 +190,20 @@ struct Ripple {
     y: f32,
     t0: f32,
     rect: (f32, f32, f32, f32),
+}
+
+/// height of the bar at the top, and where the page's controls start
+const TOPBAR: f32 = 56.0;
+const ITEMS_TOP: f32 = 462.0;
+
+/// A thing on a page, as it is drawn: switches are chips, sliders are dials, themes are orbs.
+enum Piece {
+    Heading(String),
+    Text(String),
+    Chip { id: Id, label: String, on: bool },
+    Action { id: Id, label: String, style: u8 },
+    Dial { id: Id, label: String, v: f32, lo: f32, hi: f32, val: String, unit: String },
+    Orb(u8, &'static str, bool),
 }
 
 const SUBTITLES: [&str; 6] = [
@@ -262,8 +279,8 @@ fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
 
 impl Panel {
     /// The default (and smallest) size of the window's inside, logical pixels.
-    pub const DEFAULT_SIZE: (f32, f32) = (920.0, 740.0);
-    pub const MIN_SIZE: (f32, f32) = (700.0, 460.0);
+    pub const DEFAULT_SIZE: (f32, f32) = (980.0, 790.0);
+    pub const MIN_SIZE: (f32, f32) = (780.0, 640.0);
 
     pub fn new(scale: f32, s: Settings, autostart: bool, size_px: (u32, u32)) -> Panel {
         let mut p = Panel {
@@ -311,6 +328,8 @@ impl Panel {
             ripples: Vec::new(),
             burst: -1.0,
             stage_force: true,
+            dock_k: [0.0; 6],
+            bg_cache: None,
         };
         p.pal_theme = p.s.theme;
         p.status = format!("Updates come from github.com/{}", p.s.update_repo);
@@ -524,13 +543,15 @@ impl Panel {
         // the little animations of the window itself
         self.t_anim += dt;
         self.page_anim += dt;
-        let target = 84.0 + self.page as f32 * 42.0;
-        let d = target - self.nav_y;
-        if d.abs() > 0.2 {
-            self.nav_y += d * (1.0 - (-dt * 16.0).exp());
-            moving = true;
-        } else {
-            self.nav_y = target;
+        for i in 0..6 {
+            let target = if self.page as usize == i { 1.0 } else { 0.0 };
+            let d = target - self.dock_k[i];
+            if d.abs() > 0.004 {
+                self.dock_k[i] += d * (1.0 - (-dt * 14.0).exp());
+                moving = true;
+            } else {
+                self.dock_k[i] = target;
+            }
         }
         if self.page_anim < 0.8 {
             moving = true;
@@ -572,7 +593,7 @@ impl Panel {
         if self.anim.iter().any(|a| (a.2 - a.1).abs() > 0.001) {
             return Some(16);
         }
-        if self.page_anim < 0.8 || self.pal_k < 1.0 || !self.ripples.is_empty() || self.burst >= 0.0 || (84.0 + self.page as f32 * 42.0 - self.nav_y).abs() > 0.2 {
+        if self.page_anim < 0.8 || self.pal_k < 1.0 || !self.ripples.is_empty() || self.burst >= 0.0 || (0..6).any(|i| (self.dock_k[i] - if self.page as usize == i { 1.0 } else { 0.0 }).abs() > 0.004) {
             return Some(16);
         }
         match self.preview.need() {
@@ -626,182 +647,518 @@ impl Panel {
         (&self.pm, rects)
     }
 
-    /// The top of the page list: the name, the version, and the little logo (a pill that now and then lets a bubble float up).
-    /// Click it for a burst of bubbles.
+    /// The colour of each page (its dock button, its switches, its dials).
+    fn cat_color(&self, page: u8) -> [u8; 3] {
+        const CAT: [[u8; 3]; 6] = [[100, 210, 255], [255, 92, 141], [255, 159, 10], [64, 156, 255], [176, 132, 255], [48, 209, 88]];
+        CAT[(page as usize).min(5)]
+    }
+
+    /// The background: the theme's colour with two soft glows in the colour of the page. (Made once, then copied.)
+    fn paint_bg(&self, pm: &mut Pixmap) {
+        let pal = self.pal();
+        let c = self.cat_color(self.page);
+        pm.fill(Color::from_rgba8(pal.win_bg[0], pal.win_bg[1], pal.win_bg[2], 255));
+        let (w, h) = (pm.width() as f32, pm.height() as f32);
+        let glow = |pm: &mut Pixmap, cx: f32, cy: f32, r: f32, a: u8| {
+            let mut paint = Paint::default();
+            paint.shader = RadialGradient::new(
+                Point::from_xy(cx, cy),
+                Point::from_xy(cx, cy),
+                r,
+                vec![GradientStop::new(0.0, tiny_skia::Color::from_rgba8(c[0], c[1], c[2], a)), GradientStop::new(1.0, tiny_skia::Color::from_rgba8(c[0], c[1], c[2], 0))],
+                SpreadMode::Pad,
+                Transform::identity(),
+            )
+            .unwrap_or(tiny_skia::Shader::SolidColor(tiny_skia::Color::TRANSPARENT));
+            if let Some(r) = tiny_skia::Rect::from_xywh(0.0, 0.0, w, h) {
+                pm.fill_rect(r, &paint, Transform::identity(), None);
+            }
+        };
+        let k = if pal.light { 0.55 } else { 1.0 };
+        glow(pm, w * 0.12, h * 0.05, w * 0.55, (46.0 * k) as u8);
+        glow(pm, w * 0.95, h * 0.95, w * 0.5, (30.0 * k) as u8);
+    }
+
+    /// Copy rows `y0..y1` (physical pixels) of the background over what is there (the cache, or painted fresh while the theme fades).
+    fn restore_bg(&mut self, pm: &mut Pixmap, y0: u32, y1: u32) {
+        let (pw, ph) = (pm.width(), pm.height());
+        let key = (pw, ph, self.pal_theme, self.page);
+        let fading = self.pal_k < 1.0;
+        if !fading && self.bg_cache.as_ref().map(|(k, _)| *k != key).unwrap_or(true) {
+            let mut bg = Pixmap::new(pw, ph).unwrap();
+            self.paint_bg(&mut bg);
+            self.bg_cache = Some((key, bg));
+        }
+        let y1 = y1.min(ph);
+        let (a, b) = ((y0 * pw * 4) as usize, (y1 * pw * 4) as usize);
+        match (&self.bg_cache, fading) {
+            (Some((_, bg)), false) => pm.data_mut()[a..b].copy_from_slice(&bg.data()[a..b]),
+            _ => {
+                let mut bg = Pixmap::new(pw, ph).unwrap();
+                self.paint_bg(&mut bg);
+                pm.data_mut()[a..b].copy_from_slice(&bg.data()[a..b]);
+            }
+        }
+    }
+
+    /// The top bar: the logo (a little pill that lets a bubble float up now and then; click it for a burst), the name and version, and
+    /// - when there are unsaved changes - Discard and Save.
     #[allow(non_snake_case, unused_variables)]
     fn draw_logo(&mut self, pm: &mut Pixmap, push_hot: bool) {
         let s = self.scale;
         let pal = self.pal();
-        let (WIN_BG, TEXT, DIM, ACCENT) = (pal.win_bg, pal.text, pal.dim, pal.accent);
-        rr(pm, s, 0.0, 0.0, SIDE, 84.0, 0.0, WIN_BG, 1.0);
-        self.fonts.draw(pm, Weight::Semibold, "Bloop", 22.0 * s, 40.0 * s, 18.0 * s, TEXT, 1.0);
-        self.fonts.draw(pm, Weight::Regular, &format!("Settings - version {}", crate::version::VERSION), 22.0 * s, 60.0 * s, 12.0 * s, DIM, 1.0);
+        let (TEXT, DIM) = (pal.text, pal.dim);
+        let ACCENT = self.cat_color(self.page);
+        let h = (TOPBAR * s).ceil() as u32;
+        let full = pm.width();
+        // (the bar's own background first)
+        self.restore_bg(pm, 0, h);
         let t = self.t_anim;
         // the pill
-        let (px, py, pw, ph) = (SIDE - 78.0, 24.0, 52.0, 24.0);
-        let squash = if self.burst >= 0.0 { 1.0 + 0.12 * (self.burst * 14.0).sin() * (-self.burst * 4.0).exp() } else { 1.0 };
+        let (px, py, pw, ph) = (22.0, 14.0, 56.0, 26.0);
+        let squash = if self.burst >= 0.0 { 1.0 + 0.14 * (self.burst * 14.0).sin() * (-self.burst * 4.0).exp() } else { 1.0 };
         let (qw, qh) = (pw * squash, ph / squash);
         let (qx, qy) = (px + (pw - qw) / 2.0, py + (ph - qh) / 2.0);
         rr(pm, s, qx, qy, qw, qh, qh / 2.0, [0, 0, 0], 1.0);
-        rr(pm, s, qx + 5.0, qy + qh / 2.0 - 7.0, 14.0, 14.0, 4.5, [255, 138, 76], 1.0);
-        rr(pm, s, qx + 8.0, qy + qh / 2.0 - 4.0, 8.0, 8.0, 3.0, [255, 80, 150], 0.85);
+        rr(pm, s, qx + 5.0, qy + qh / 2.0 - 7.5, 15.0, 15.0, 5.0, [255, 138, 76], 1.0);
+        rr(pm, s, qx + 8.5, qy + qh / 2.0 - 4.0, 8.0, 8.0, 3.0, [255, 80, 150], 0.85);
         for i in 0..3 {
-            let h = 4.0 + 6.0 * (0.5 + 0.5 * (t * (5.0 + i as f32 * 1.7) + i as f32 * 1.3).sin());
-            rr(pm, s, qx + qw - 20.0 + i as f32 * 5.0, qy + qh / 2.0 - h / 2.0, 2.4, h, 1.2, [255, 255, 255], 0.9);
+            let bh = 4.0 + 7.0 * (0.5 + 0.5 * (t * (5.0 + i as f32 * 1.7) + i as f32 * 1.3).sin());
+            rr(pm, s, qx + qw - 21.0 + i as f32 * 5.5, qy + qh / 2.0 - bh / 2.0, 2.6, bh, 1.3, [255, 255, 255], 0.9);
         }
         // a bubble leaves the pill every few seconds, floats up and pops
         let p = (t % 3.8) / 3.8;
         if p < 0.55 {
             let q = p / 0.55;
-            let (bx, by) = (qx + qw + 2.0 + q * 12.0, qy + qh / 2.0 - q * 24.0);
+            let (bx, by) = (qx + qw + 3.0 + q * 10.0, qy + qh / 2.0 - q * 12.0);
             let r = 2.0 + 3.6 * (std::f32::consts::PI * (q * 0.9).min(1.0)).sin().max(0.2) * (1.0 - q * 0.3);
             let a = if q > 0.82 { 1.0 - (q - 0.82) / 0.18 } else { 1.0 };
             rr(pm, s, bx - r, by - r, r * 2.0, r * 2.0, r, ACCENT, 0.9 * a);
             if q > 0.8 {
                 let ring = (q - 0.8) / 0.2;
-                let rr_ = r + ring * 6.0;
-                rr(pm, s, bx - rr_, by - rr_, rr_ * 2.0, rr_ * 2.0, rr_, ACCENT, 0.25 * (1.0 - ring));
-                rr(pm, s, bx - rr_ + 1.2, by - rr_ + 1.2, rr_ * 2.0 - 2.4, rr_ * 2.0 - 2.4, rr_ - 1.2, WIN_BG, 0.25 * (1.0 - ring));
+                let rd = r + ring * 6.0;
+                rr(pm, s, bx - rd, by - rd, rd * 2.0, rd * 2.0, rd, ACCENT, 0.25 * (1.0 - ring));
             }
         }
-        // the burst
         if self.burst >= 0.0 {
             let b = (self.burst / 0.9).min(1.0);
             for i in 0..9 {
                 let ang = i as f32 / 9.0 * std::f32::consts::TAU + 0.4;
-                let d = 10.0 + 34.0 * (1.0 - (1.0 - b).powi(3));
+                let d = 10.0 + 38.0 * (1.0 - (1.0 - b).powi(3));
                 let r = 4.5 * (1.0 - b * 0.7);
                 let (bx, by) = (px + pw / 2.0 + ang.cos() * d * 1.5, py + ph / 2.0 + ang.sin() * d);
                 rr(pm, s, bx - r, by - r, r * 2.0, r * 2.0, r, if i % 2 == 0 { ACCENT } else { [255, 138, 76] }, 0.85 * (1.0 - b));
             }
         }
+        self.fonts.draw(pm, Weight::Bold, "Bloop", 94.0 * s, 32.0 * s, 21.0 * s, TEXT, 1.0);
+        self.fonts.draw(pm, Weight::Regular, &format!("v{}", crate::version::VERSION), 160.0 * s, 32.0 * s, 12.0 * s, DIM, 1.0);
         if push_hot {
-            self.hot.push(Hot { id: Id::Logo, x: px - 8.0, y: 8.0, w: pw + 40.0, h: 66.0 });
+            self.hot.push(Hot { id: Id::Logo, x: px - 8.0, y: 4.0, w: 190.0, h: 46.0 });
+        }
+        let _ = full;
+    }
+
+    /// A flat little icon for the dock (white shapes on the coloured circle).
+    fn draw_glyph(&self, pm: &mut Pixmap, kind: usize, cx: f32, cy: f32, sz: f32, fg: [u8; 3], bg: [u8; 3]) {
+        let s = self.scale;
+        let c = |pm: &mut Pixmap, x: f32, y: f32, r: f32, col: [u8; 3]| rr(pm, s, cx + x * sz - r * sz, cy + y * sz - r * sz, 2.0 * r * sz, 2.0 * r * sz, r * sz, col, 1.0);
+        let b = |pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, r: f32, col: [u8; 3]| rr(pm, s, cx + x * sz, cy + y * sz, w * sz, h * sz, r * sz, col, 1.0);
+        match kind {
+            0 => {
+                // two sliders
+                b(pm, -0.34, -0.19, 0.68, 0.07, 0.035, fg);
+                b(pm, -0.34, 0.12, 0.68, 0.07, 0.035, fg);
+                c(pm, -0.1, -0.155, 0.11, fg);
+                c(pm, -0.1, -0.155, 0.05, bg);
+                c(pm, 0.14, 0.155, 0.11, fg);
+                c(pm, 0.14, 0.155, 0.05, bg);
+            }
+            1 => {
+                // a note
+                c(pm, -0.1, 0.17, 0.14, fg);
+                b(pm, 0.02, -0.3, 0.06, 0.5, 0.03, fg);
+                b(pm, 0.02, -0.3, 0.24, 0.11, 0.05, fg);
+            }
+            2 => {
+                // a bell
+                c(pm, 0.0, -0.06, 0.2, fg);
+                b(pm, -0.2, -0.06, 0.4, 0.2, 0.02, fg);
+                b(pm, -0.27, 0.08, 0.54, 0.09, 0.045, fg);
+                c(pm, 0.0, 0.25, 0.065, fg);
+            }
+            3 => {
+                // a window
+                b(pm, -0.3, -0.24, 0.6, 0.48, 0.07, fg);
+                b(pm, -0.26, -0.12, 0.52, 0.32, 0.03, bg);
+                c(pm, -0.2, -0.18, 0.025, bg);
+            }
+            4 => {
+                // a drop
+                c(pm, 0.0, 0.09, 0.21, fg);
+                let mut pb = PathBuilder::new();
+                pb.move_to(cx, cy - 0.32 * sz);
+                pb.line_to(cx + 0.19 * sz, cy);
+                pb.line_to(cx - 0.19 * sz, cy);
+                pb.close();
+                if let Some(path) = pb.finish() {
+                    let mut paint = Paint::default();
+                    paint.set_color_rgba8(fg[0], fg[1], fg[2], 255);
+                    paint.anti_alias = true;
+                    pm.fill_path(&path, &paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
+                }
+            }
+            _ => {
+                // an arrow up
+                let mut pb = PathBuilder::new();
+                pb.move_to(cx, cy - 0.3 * sz);
+                pb.line_to(cx + 0.24 * sz, cy - 0.02 * sz);
+                pb.line_to(cx - 0.24 * sz, cy - 0.02 * sz);
+                pb.close();
+                if let Some(path) = pb.finish() {
+                    let mut paint = Paint::default();
+                    paint.set_color_rgba8(fg[0], fg[1], fg[2], 255);
+                    paint.anti_alias = true;
+                    pm.fill_path(&path, &paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
+                }
+                b(pm, -0.075, -0.04, 0.15, 0.3, 0.03, fg);
+            }
+        }
+    }
+
+    /// What the thing under the mouse does (shown under the dock).
+    fn hint_for(&self, rows: &[Row], id: Id) -> String {
+        for r in rows {
+            match r {
+                Row::Toggle(i, t, d, _) if *i == id => return format!("{t}: {d}"),
+                Row::Slider(i, t, d, ..) if *i == id => return format!("{t}: {d}"),
+                Row::Button(i, t, d, _, _) if *i == id => return format!("{t}: {d}"),
+                Row::Radio(t, _, _, opts) => {
+                    if let Id::MaxOpt(n) = id {
+                        return format!("{t}: {}", opts[(n as usize).min(2)]);
+                    }
+                }
+                Row::Themes(_) => {
+                    if let Id::Theme(n) = id {
+                        return format!("Theme {}: the colours of this window (the island itself stays black)", THEMES[(n as usize).min(5)].name);
+                    }
+                }
+                _ => {}
+            }
+        }
+        match id {
+            Id::Nav(i) => SUBTITLES[(i as usize).min(5)].to_string(),
+            Id::Logo => "Bloop! Click for bubbles".to_string(),
+            Id::DemoNotif => "Send a notification to the live island above".to_string(),
+            Id::DemoStatus => "Show a status pill (Wi-Fi, Bluetooth, battery ...)".to_string(),
+            Id::DemoMax => "Pretend a window is maximized under the island".to_string(),
+            Id::DemoFs => "Pretend a full-screen app is open".to_string(),
+            Id::Save => "Apply everything to the running island".to_string(),
+            Id::Discard => "Throw the changes away".to_string(),
+            _ => String::new(),
         }
     }
 
     pub fn render(&mut self) -> &Pixmap {
         self.needs_full = false;
         let pal = self.pal();
-        let (WIN_BG, PAGE_BG, CARD, CARD_HOVER, EDGE, TEXT, DIM, ACCENT, ON_ACCENT, NAV_ON, NAV_HOVER) = (pal.win_bg, pal.page_bg, pal.card, pal.card_hover, pal.edge, pal.text, pal.dim, pal.accent, pal.on_accent, pal.nav_on, pal.nav_hover);
-        let (BTN, TRACK) = (mix(pal.card, pal.text, 0.14), mix(pal.card, pal.text, 0.34));
+        let (CARD, CARD_HOVER, EDGE, TEXT, DIM) = (pal.card, pal.card_hover, pal.edge, pal.text, pal.dim);
         let s = self.scale;
+        let acc = self.cat_color(self.page);
+        let on_acc = if acc[0] as f32 * 0.299 + acc[1] as f32 * 0.587 + acc[2] as f32 * 0.114 > 150.0 { [20, 20, 26] } else { [255, 255, 255] };
         let mut pm = std::mem::replace(&mut self.pm, Pixmap::new(1, 1).unwrap());
-        pm.fill(Color::from_rgba8(PAGE_BG[0], PAGE_BG[1], PAGE_BG[2], 255));
+        let (pw, ph) = (pm.width(), pm.height());
+        self.restore_bg(&mut pm, 0, ph);
         self.hot.clear();
         let (w, h) = (self.w, self.h);
-
-        // ---- the list of pages ----
-        rr(&mut pm, s, 0.0, 0.0, SIDE, h, 0.0, WIN_BG, 1.0);
-        self.draw_logo(&mut pm, true);
-        // the highlight glides to the chosen page
-        rr(&mut pm, s, 10.0, self.nav_y, SIDE - 20.0, 38.0, 5.0, NAV_ON, 1.0);
-        rr(&mut pm, s, 10.0, self.nav_y + 11.0, 3.0, 16.0, 1.5, ACCENT, 1.0);
-        for (i, name) in PAGES.iter().enumerate() {
-            let id = Id::Nav(i as u8);
-            let (x, y, bw, bh) = (10.0, 84.0 + i as f32 * 42.0, SIDE - 20.0, 38.0);
-            let on = self.page == i as u8;
-            let hov = self.hover == Some(id);
-            if !on && hov {
-                rr(&mut pm, s, x, y, bw, bh, 5.0, NAV_HOVER, 1.0);
-            }
-            self.text_mid(&mut pm, if on { Weight::Semibold } else { Weight::Regular }, name, x + 18.0, y + bh / 2.0, 14.5, TEXT);
-            self.hot.push(Hot { id, x, y, w: bw, h: bh });
-        }
-        // quit, at the bottom of the list
-        {
-            let (x, y, bw, bh) = (10.0, h - 52.0, SIDE - 20.0, 38.0);
-            let hov = self.hover == Some(Id::Quit);
-            if hov {
-                rr(&mut pm, s, x, y, bw, bh, 5.0, NAV_HOVER, 1.0);
-            }
-            self.text_mid(&mut pm, Weight::Regular, "Quit Bloop", x + 18.0, y + bh / 2.0, 14.0, if pal.light { [200, 40, 40] } else { [255, 138, 128] });
-            self.hot.push(Hot { id: Id::Quit, x, y, w: bw, h: bh });
-        }
-
-        // ---- the settings of the page ----
-        let cx = SIDE + 36.0;
-        let cw = (w - SIDE - 72.0).clamp(300.0, 760.0);
-        const ROWS_TOP: f32 = 348.0;
-        let mut y = ROWS_TOP - self.scroll;
         let rows = self.rows();
-        for (i, row) in rows.iter().enumerate() {
-            let rh = row.height();
-            // the rows slide up into place one after another when the page changes
-            let k = ((self.page_anim - 0.045 * i as f32) / 0.3).clamp(0.0, 1.0);
-            let off = 26.0 * (1.0 - k).powi(3);
-            self.draw_row(&mut pm, row, cx, y + off, cw, rh);
-            y += rh + 6.0;
+
+        // ---- the settings of the page: switches as chips, sliders as dials, themes as orbs ----
+        let cw = (w - 64.0).min(760.0);
+        let ml = (w - cw) / 2.0;
+        let items_top = ITEMS_TOP;
+        let pieces = self.pieces(&rows);
+        let mut x = ml;
+        let mut y = items_top - self.scroll;
+        let mut line_h = 0.0f32;
+        let gap = 12.0;
+        for (i, pc) in pieces.iter().enumerate() {
+            let (iw, ih, newline) = match pc {
+                Piece::Heading(_) | Piece::Text(_) => (cw, 26.0, true),
+                Piece::Chip { label, .. } => ((self.fonts.measure(Weight::Semibold, label, 14.5 * s) / s + 56.0).min(cw), 42.0, false),
+                Piece::Action { label, .. } => (self.fonts.measure(Weight::Semibold, label, 14.5 * s) / s + 44.0, 42.0, false),
+                Piece::Dial { .. } => (124.0, 142.0, false),
+                Piece::Orb(..) => (78.0, 86.0, false),
+            };
+            // a new line when it does not fit, for headings, and when the kind of thing changes (switches / dials / orbs)
+            let group = |pc: &Piece| match pc {
+                Piece::Chip { .. } | Piece::Action { .. } => 0,
+                Piece::Dial { .. } => 1,
+                Piece::Orb(..) => 2,
+                _ => 3,
+            };
+            let changed = i > 0 && group(&pieces[i - 1]) != group(pc);
+            if (newline && x > ml) || (x > ml && (x + iw > ml + cw || changed)) {
+                y += line_h + gap;
+                x = ml;
+                line_h = 0.0;
+            }
+            let k = ((self.page_anim - 0.035 * i as f32) / 0.32).clamp(0.0, 1.0);
+            let off = 22.0 * (1.0 - k).powi(3);
+            let oy = y + off;
+            match pc {
+                Piece::Heading(t) => {
+                    self.fonts.draw(&mut pm, Weight::Semibold, &t.to_uppercase(), x * s, (oy + 17.0) * s, 11.5 * s, DIM, 1.0);
+                }
+                Piece::Text(t) => {
+                    let t = self.fonts.fit(Weight::Regular, t, 13.5 * s, iw * s);
+                    self.fonts.draw(&mut pm, Weight::Regular, &t, x * s, (oy + 17.0) * s, 13.5 * s, DIM, 1.0);
+                }
+                Piece::Chip { id, label, on } => {
+                    let t = self.want(*id, if *on { 1.0 } else { 0.0 });
+                    let e = t * t * (3.0 - 2.0 * t);
+                    let squash = 1.0 + 0.07 * (std::f32::consts::PI * t).sin();
+                    let hov = self.hover == Some(*id);
+                    let (bw, bh) = (iw * squash, ih / squash);
+                    let (bx, by) = (x + (iw - bw) / 2.0, oy + (ih - bh) / 2.0);
+                    let base = if hov { CARD_HOVER } else { CARD };
+                    rr(&mut pm, s, bx - 1.0, by - 1.0, bw + 2.0, bh + 2.0, bh / 2.0 + 1.0, mix(EDGE, acc, e), 1.0);
+                    rr(&mut pm, s, bx, by, bw, bh, bh / 2.0, mix(base, acc, e), 1.0);
+                    // the dot: hollow when off, a solid white one when on
+                    rr(&mut pm, s, bx + 16.0, by + bh / 2.0 - 6.0, 12.0, 12.0, 6.0, mix(EDGE, on_acc, e), 1.0);
+                    rr(&mut pm, s, bx + 18.0, by + bh / 2.0 - 4.0, 8.0, 8.0, 4.0, mix(base, acc, e), 1.0);
+                    rr(&mut pm, s, bx + 19.5, by + bh / 2.0 - 2.5, 5.0, 5.0, 2.5, on_acc, e);
+                    let l = self.fonts.fit(Weight::Semibold, label, 14.5 * s, (iw - 52.0) * s);
+                    self.text_mid(&mut pm, Weight::Semibold, &l, bx + 38.0, by + bh / 2.0, 14.5, mix(TEXT, on_acc, e));
+                    self.hot.push(Hot { id: *id, x, y: oy, w: iw, h: ih });
+                }
+                Piece::Action { id, label, style } => {
+                    let hov = self.hover == Some(*id);
+                    let pressed = hov && self.down == Some(*id);
+                    let base = if *style == 1 { acc } else { CARD };
+                    let col = if pressed { mix(base, [0, 0, 0], 0.25) } else if hov { mix(base, [255, 255, 255], 0.14) } else { base };
+                    let grow = if hov { 1.04 } else { 1.0 };
+                    let (bw, bh) = (iw * grow, ih * grow);
+                    let (bx, by) = (x + (iw - bw) / 2.0, oy + (ih - bh) / 2.0);
+                    rr(&mut pm, s, bx - 1.0, by - 1.0, bw + 2.0, bh + 2.0, bh / 2.0 + 1.0, if *style == 2 { [255, 105, 97] } else { EDGE }, if *style == 1 { 0.0 } else { 1.0 });
+                    rr(&mut pm, s, bx, by, bw, bh, bh / 2.0, col, 1.0);
+                    let tc = if *style == 1 { on_acc } else if *style == 2 { [255, 120, 110] } else { TEXT };
+                    self.text_mid(&mut pm, Weight::Semibold, label, bx + 22.0, by + bh / 2.0, 14.5, tc);
+                    self.hot.push(Hot { id: *id, x, y: oy, w: iw, h: ih });
+                }
+                Piece::Dial { id, label, v, lo, hi, val, unit } => {
+                    let frac = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
+                    let (dcx, dcy, r) = (x + iw / 2.0, oy + 52.0, 38.0);
+                    let held = self.drag == Some(*id);
+                    let hov = self.hover == Some(*id);
+                    // the dial: a ring, the part that is "full" in the page's colour, and a knob at the end
+                    rr(&mut pm, s, dcx - r - 6.0, dcy - r - 6.0, 2.0 * (r + 6.0), 2.0 * (r + 6.0), r + 6.0, if hov || held { CARD_HOVER } else { CARD }, 1.0);
+                    self.arc(&mut pm, dcx, dcy, r, 135.0, 405.0, 7.0, EDGE, 1.0);
+                    if frac > 0.002 {
+                        self.arc(&mut pm, dcx, dcy, r, 135.0, 135.0 + 270.0 * frac, 7.0, acc, 1.0);
+                    }
+                    let ang = (135.0 + 270.0 * frac).to_radians();
+                    let kr = if held { 8.5 } else { 6.5 };
+                    rr(&mut pm, s, dcx + ang.cos() * r - kr, dcy + ang.sin() * r - kr, kr * 2.0, kr * 2.0, kr, [255, 255, 255], 1.0);
+                    let vw = self.fonts.measure(Weight::Bold, val, 19.0 * s) / s;
+                    self.text_mid(&mut pm, Weight::Bold, val, dcx - vw / 2.0, dcy - 4.0, 19.0, TEXT);
+                    let uw = self.fonts.measure(Weight::Regular, unit, 11.5 * s) / s;
+                    self.text_mid(&mut pm, Weight::Regular, unit, dcx - uw / 2.0, dcy + 14.0, 11.5, DIM);
+                    let lw = self.fonts.measure(Weight::Regular, label, 13.0 * s) / s;
+                    self.text_mid(&mut pm, Weight::Regular, label, x + iw / 2.0 - lw.min(iw) / 2.0, oy + 118.0, 13.0, TEXT);
+                    self.hot.push(Hot { id: *id, x: dcx - r - 8.0, y: dcy - r - 8.0, w: 2.0 * (r + 8.0), h: 2.0 * (r + 8.0) });
+                }
+                Piece::Orb(n, name, chosen) => {
+                    let t = &THEMES[(*n as usize).min(5)];
+                    let id = Id::Theme(*n);
+                    let hov = self.hover == Some(id);
+                    let (ocx, ocy, r) = (x + iw / 2.0, oy + 28.0, if hov { 26.0 } else { 24.0 });
+                    if *chosen {
+                        rr(&mut pm, s, ocx - r - 4.0, ocy - r - 4.0, 2.0 * (r + 4.0), 2.0 * (r + 4.0), r + 4.0, acc, 1.0);
+                    }
+                    rr(&mut pm, s, ocx - r, ocy - r, 2.0 * r, 2.0 * r, r, t.win_bg, 1.0);
+                    rr(&mut pm, s, ocx - r + 5.0, ocy - r + 5.0, 2.0 * r - 10.0, 2.0 * r - 10.0, r - 5.0, t.card, 1.0);
+                    rr(&mut pm, s, ocx - 8.0, ocy - 8.0, 16.0, 16.0, 8.0, t.accent, 1.0);
+                    let nw = self.fonts.measure(Weight::Regular, name, 12.0 * s) / s;
+                    self.text_mid(&mut pm, Weight::Regular, name, ocx - nw / 2.0, oy + 68.0, 12.0, if *chosen { TEXT } else { DIM });
+                    self.hot.push(Hot { id, x: ocx - 30.0, y: oy - 2.0, w: 60.0, h: 80.0 });
+                }
+            }
+            x += iw + gap;
+            line_h = line_h.max(ih);
         }
+        let total = y + line_h + self.scroll + 40.0;
+        self.max_scroll = (total - h).max(0.0);
+        self.scroll = self.scroll.min(self.max_scroll);
+
         // ripples from presses
         for r in &self.ripples {
             let age = (self.t_anim - r.t0) / 0.55;
             let (rx, ry, rw, rh) = r.rect;
-            let rad = age.sqrt() * rw.max(rh) * 0.45;
-            if let (Some(mut mask), Some(clip), Some(circle)) = (Mask::new(pm.width(), pm.height()), crate::gfx::rrect(rx * s, ry * s, rw * s, rh * s, [6.0 * s; 4]), crate::gfx::rrect((r.x - rad) * s, (r.y - rad) * s, rad * 2.0 * s, rad * 2.0 * s, [rad * s; 4])) {
+            let rad = age.sqrt() * rw.max(rh) * 0.5;
+            if let (Some(mut mask), Some(clip), Some(circle)) = (Mask::new(pw, ph), crate::gfx::rrect(rx * s, ry * s, rw * s, rh * s, [rh * 0.5 * s; 4]), crate::gfx::rrect((r.x - rad) * s, (r.y - rad) * s, rad * 2.0 * s, rad * 2.0 * s, [rad * s; 4])) {
                 mask.fill_path(&clip, tiny_skia::FillRule::Winding, true, Transform::identity());
                 let mut paint = Paint::default();
-                paint.set_color_rgba8(ACCENT[0], ACCENT[1], ACCENT[2], ((1.0 - age) * 34.0) as u8);
+                paint.set_color_rgba8(255, 255, 255, ((1.0 - age) * 60.0) as u8);
                 paint.anti_alias = true;
                 pm.fill_path(&circle, &paint, tiny_skia::FillRule::Winding, Transform::identity(), Some(&mask));
             }
         }
-        let total = y + self.scroll + 90.0;
-        self.max_scroll = (total - h).max(0.0);
-        self.scroll = self.scroll.min(self.max_scroll);
 
-        // everything above the rows stays where it is: the live island, the title and the little buttons
-        rr(&mut pm, s, SIDE, 0.0, w - SIDE, ROWS_TOP - 8.0, 0.0, PAGE_BG, 1.0);
-        self.draw_stage(&mut pm, cx, 16.0, cw, 246.0);
-        self.fonts.draw(&mut pm, Weight::Semibold, PAGES[self.page as usize], cx * s, 300.0 * s, 26.0 * s, TEXT, 1.0);
-        self.fonts.draw(&mut pm, Weight::Regular, SUBTITLES[self.page as usize], cx * s, 324.0 * s, 13.0 * s, DIM, 1.0);
-        // the buttons that make the preview show things
-        let mut bx = cx + cw;
-        for (id, label, on) in [(Id::DemoFs, "Full-screen", self.demo_fs), (Id::DemoMax, "Maximized", self.demo_max), (Id::DemoStatus, "Status pill", false), (Id::DemoNotif, "Notification", false)] {
-            let tw = self.fonts.measure(Weight::Semibold, label, 12.5 * s) / s;
-            let bw = tw + 26.0;
-            bx -= bw;
-            let hov = self.hover == Some(id);
-            let down = hov && self.down == Some(id);
-            let base = if on { ACCENT } else { BTN };
-            let col = if down { mix(base, [0, 0, 0], 0.22) } else if hov { mix(base, [255, 255, 255], 0.12) } else { base };
-            rr(&mut pm, s, bx, 276.0, bw, 28.0, 14.0, col, 1.0);
-            self.text_mid(&mut pm, Weight::Semibold, label, bx + 13.0, 290.0, 12.5, if on { ON_ACCENT } else { TEXT });
-            self.hot.push(Hot { id, x: bx, y: 276.0, w: bw, h: 28.0 });
-            bx -= 8.0;
-        }
-        // unsaved changes: a bar at the bottom with Discard / Save
+        // everything above the items stays where it is: cover what scrolled under it, then the bar, the live island, the dock
+        self.restore_bg(&mut pm, 0, ((items_top - 4.0) * s) as u32);
+        self.draw_logo(&mut pm, true);
+        // Save / Discard (only with unsaved changes)
         if self.dirty() {
-            let bh = 64.0;
-            rr(&mut pm, s, SIDE, h - bh, w - SIDE, bh, 0.0, CARD, 1.0);
-            rr(&mut pm, s, SIDE, h - bh, w - SIDE, 1.0, 0.0, EDGE, 1.0);
-            rr(&mut pm, s, cx, h - bh / 2.0 - 4.0, 8.0, 8.0, 4.0, ACCENT, 1.0);
-            let msg = self.fonts.fit(Weight::Regular, "Unsaved changes - not applied until you save", 13.0 * s, (cw - 290.0).max(80.0) * s);
-            self.text_mid(&mut pm, Weight::Regular, &msg, cx + 18.0, h - bh / 2.0, 13.0, TEXT);
-            let mut bx = cx + cw;
+            let pulse = 0.5 + 0.5 * (self.t_anim * 4.0).sin();
+            let mut bx = w - 24.0;
             for (id, label, primary) in [(Id::Save, "Save", true), (Id::Discard, "Discard", false)] {
-                let bw = if primary { 96.0 } else { 90.0 };
+                let tw = self.fonts.measure(Weight::Semibold, label, 14.0 * s) / s;
+                let bw = tw + 36.0;
                 bx -= bw;
                 let hov = self.hover == Some(id);
                 let down = hov && self.down == Some(id);
-                let base = if primary { ACCENT } else { BTN };
-                let col = if down { mix(base, [0, 0, 0], 0.22) } else if hov { mix(base, [255, 255, 255], 0.12) } else { base };
-                rr(&mut pm, s, bx, h - bh / 2.0 - 16.0, bw, 32.0, 5.0, col, 1.0);
-                let tw = self.fonts.measure(Weight::Semibold, label, 13.5 * s) / s;
-                self.text_mid(&mut pm, Weight::Semibold, label, bx + bw / 2.0 - tw / 2.0, h - bh / 2.0, 13.5, if primary { ON_ACCENT } else { TEXT });
-                self.hot.insert(0, Hot { id, x: bx, y: h - bh / 2.0 - 16.0, w: bw, h: 32.0 });
+                let base = if primary { acc } else { CARD };
+                let col = if down { mix(base, [0, 0, 0], 0.25) } else if hov { mix(base, [255, 255, 255], 0.14) } else { base };
+                rr(&mut pm, s, bx, 12.0, bw, 32.0, 16.0, col, 1.0);
+                self.text_mid(&mut pm, Weight::Semibold, label, bx + 18.0, 28.0, 14.0, if primary { on_acc } else { TEXT });
+                self.hot.insert(0, Hot { id, x: bx, y: 12.0, w: bw, h: 32.0 });
                 bx -= 10.0;
             }
+            let msg = "Unsaved changes";
+            let mw = self.fonts.measure(Weight::Regular, msg, 13.0 * s) / s;
+            self.text_mid(&mut pm, Weight::Regular, msg, bx - mw - 4.0, 28.0, 13.0, TEXT);
+            rr(&mut pm, s, bx - mw - 20.0, 24.0, 8.0, 8.0, 4.0, acc, 0.5 + 0.5 * pulse);
         }
-        // a thin scroll bar
-        if self.max_scroll > 0.0 {
-            let vh = h - ROWS_TOP;
-            let th = (vh * (h - ROWS_TOP) / (total - ROWS_TOP)).max(30.0);
-            let ty = ROWS_TOP + (vh - th) * (self.scroll / self.max_scroll);
-            rr(&mut pm, s, w - 8.0, ty, 3.0, th, 1.5, TRACK, 0.9);
+
+        // the live island
+        let sw = (w - 64.0).min(760.0);
+        self.draw_stage(&mut pm, (w - sw) / 2.0, 62.0, sw, 232.0);
+        // the little buttons that make it show things
+        let mut bx = (w - sw) / 2.0;
+        for (id, label, on) in [(Id::DemoNotif, "Notification", false), (Id::DemoStatus, "Status pill", false), (Id::DemoMax, "Maximized", self.demo_max), (Id::DemoFs, "Full-screen", self.demo_fs)] {
+            let tw = self.fonts.measure(Weight::Semibold, label, 12.5 * s) / s;
+            let bw = tw + 26.0;
+            let hov = self.hover == Some(id);
+            let down = hov && self.down == Some(id);
+            let base = if on { acc } else { CARD };
+            let col = if down { mix(base, [0, 0, 0], 0.25) } else if hov { mix(base, [255, 255, 255], 0.14) } else { base };
+            rr(&mut pm, s, bx, 300.0, bw, 28.0, 14.0, col, 1.0);
+            self.text_mid(&mut pm, Weight::Semibold, label, bx + 13.0, 314.0, 12.5, if on { on_acc } else { TEXT });
+            self.hot.push(Hot { id, x: bx, y: 300.0, w: bw, h: 28.0 });
+            bx += bw + 8.0;
         }
+
+        // the dock: one round button per page; the chosen one is big and in the page's colour
+        let n = PAGES.len() as f32;
+        let (dgap, dd) = (30.0, 58.0);
+        let total_w = n * dd + (n - 1.0) * dgap;
+        let dx0 = (w - total_w) / 2.0;
+        for (i, name) in PAGES.iter().enumerate() {
+            let id = Id::Nav(i as u8);
+            let col = self.cat_color(i as u8);
+            let k = self.dock_k[i];
+            let hov = self.hover == Some(id);
+            let d = dd * (1.0 + 0.2 * k + if hov { 0.06 } else { 0.0 });
+            let cx = dx0 + i as f32 * (dd + dgap) + dd / 2.0;
+            let cy = 368.0 - 6.0 * k;
+            let (fill, fg) = (mix(CARD, col, k), mix(DIM, if col[0] as f32 * 0.299 + col[1] as f32 * 0.587 + col[2] as f32 * 0.114 > 150.0 { [20, 20, 26] } else { [255, 255, 255] }, k));
+            if k > 0.05 {
+                rr(&mut pm, s, cx - d / 2.0 - 5.0, cy - d / 2.0 - 5.0, d + 10.0, d + 10.0, d / 2.0 + 5.0, col, 0.18 * k);
+            }
+            rr(&mut pm, s, cx - d / 2.0, cy - d / 2.0, d, d, d / 2.0, fill, 1.0);
+            self.draw_glyph(&mut pm, i, cx, cy, d * 0.62, fg, fill);
+            let lw = self.fonts.measure(Weight::Semibold, name, 12.5 * s) / s;
+            self.text_mid(&mut pm, if k > 0.5 { Weight::Semibold } else { Weight::Regular }, name, cx - lw / 2.0, 414.0, 12.5, if k > 0.5 { TEXT } else { DIM });
+            self.hot.push(Hot { id, x: cx - dd / 2.0 - 6.0, y: 368.0 - dd / 2.0 - 10.0, w: dd + 12.0, h: dd + 40.0 });
+        }
+        // what the thing under the mouse does
+        let hint = match self.hover {
+            Some(id) => self.hint_for(&rows, id),
+            None => String::new(),
+        };
+        let hint = if hint.is_empty() { SUBTITLES[self.page as usize].to_string() } else { hint };
+        let hint = self.fonts.fit(Weight::Regular, &hint, 13.5 * s, (cw - 20.0) * s);
+        let hw = self.fonts.measure(Weight::Regular, &hint, 13.5 * s) / s;
+        self.text_mid(&mut pm, Weight::Regular, &hint, w / 2.0 - hw / 2.0, 440.0, 13.5, DIM);
+        let _ = (h, EDGE);
+
         self.pm = pm;
         &self.pm
+    }
+
+    /// An arc of a circle, from `a0` to `a1` degrees (0 = right, going clockwise on the screen), with round ends.
+    #[allow(clippy::too_many_arguments)]
+    fn arc(&self, pm: &mut Pixmap, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, width: f32, rgb: [u8; 3], alpha: f32) {
+        let s = self.scale;
+        let mut pb = PathBuilder::new();
+        let steps = (((a1 - a0).abs() / 4.0).ceil() as i32).max(2);
+        for i in 0..=steps {
+            let a = (a0 + (a1 - a0) * i as f32 / steps as f32).to_radians();
+            let (px, py) = ((cx + a.cos() * r) * s, (cy + a.sin() * r) * s);
+            if i == 0 {
+                pb.move_to(px, py);
+            } else {
+                pb.line_to(px, py);
+            }
+        }
+        if let Some(path) = pb.finish() {
+            let mut paint = Paint::default();
+            paint.set_color_rgba8(rgb[0], rgb[1], rgb[2], (alpha * 255.0) as u8);
+            paint.anti_alias = true;
+            let st = tiny_skia::Stroke { width: width * s, line_cap: tiny_skia::LineCap::Round, line_join: tiny_skia::LineJoin::Round, ..Default::default() };
+            pm.stroke_path(&path, &paint, &st, Transform::identity(), None);
+        }
+    }
+
+    /// The rows of a page as the pieces the page is made of: chips, dials, orbs and buttons.
+    fn pieces(&self, rows: &[Row]) -> Vec<Piece> {
+        let mut out = Vec::new();
+        for r in rows {
+            match r {
+                Row::Toggle(id, title, _, on) => {
+                    if *id == Id::FsHide {
+                        out.push(Piece::Heading("Full-screen apps".into()));
+                    }
+                    out.push(Piece::Chip { id: *id, label: title.to_string(), on: *on });
+                }
+                Row::Slider(id, title, _, v, lo, hi, text) => {
+                    let (val, unit) = match text.split_once(' ') {
+                        Some((a, b)) => (a.to_string(), b.to_string()),
+                        None => (text.clone(), String::new()),
+                    };
+                    out.push(Piece::Dial { id: *id, label: title.to_string(), v: *v, lo: *lo, hi: *hi, val, unit });
+                }
+                Row::Radio(title, _, chosen, _) => {
+                    out.push(Piece::Heading(title.to_string()));
+                    for (i, label) in ["Slim notch", "Hide", "Do nothing"].iter().enumerate() {
+                        out.push(Piece::Chip { id: Id::MaxOpt(i as u8), label: label.to_string(), on: *chosen == i });
+                    }
+                }
+                Row::Themes(chosen) => {
+                    out.push(Piece::Heading("Theme".into()));
+                    for (i, t) in THEMES.iter().enumerate() {
+                        out.push(Piece::Orb(i as u8, t.name, *chosen as usize == i));
+                    }
+                }
+                Row::Button(id, title, desc, label, style) => {
+                    if *id == Id::CheckNow {
+                        out.push(Piece::Text(desc.clone()));
+                    }
+                    let text = match id {
+                        Id::Test => "Show a test notification".to_string(),
+                        Id::Reset => "Reset all settings".to_string(),
+                        Id::Quit => "Quit Bloop".to_string(),
+                        Id::InstallFile => "Install from a file".to_string(),
+                        _ => {
+                            let _ = title;
+                            label.clone()
+                        }
+                    };
+                    out.push(Piece::Action { id: *id, label: text, style: *style });
+                }
+            }
+        }
+        out
     }
 
     /// The live island: the real island, drawn with the settings as they are right now. Hover it, click its buttons, open the player.
@@ -880,158 +1237,6 @@ impl Panel {
         self.stage_pm = Some(st);
     }
 
-    #[allow(non_snake_case, unused_variables)]
-    fn draw_row(&mut self, pm: &mut Pixmap, row: &Row, cx: f32, y: f32, cw: f32, rh: f32) {
-        let pal = self.pal();
-        let (WIN_BG, PAGE_BG, CARD, CARD_HOVER, EDGE, TEXT, DIM, ACCENT, ON_ACCENT, NAV_ON, NAV_HOVER) = (pal.win_bg, pal.page_bg, pal.card, pal.card_hover, pal.edge, pal.text, pal.dim, pal.accent, pal.on_accent, pal.nav_on, pal.nav_hover);
-        let (BTN, TRACK) = (mix(pal.card, pal.text, 0.14), mix(pal.card, pal.text, 0.34));
-        let s = self.scale;
-        let right = cx + cw - 18.0;
-        let card = |me: &Self, pm: &mut Pixmap, id: Option<Id>| {
-            let hov = id.is_some() && me.hover == id;
-            rr(pm, s, cx - 0.5, y - 0.5, cw + 1.0, rh + 1.0, 6.5, EDGE, 1.0);
-            rr(pm, s, cx, y, cw, rh, 6.0, if hov { CARD_HOVER } else { CARD }, 1.0);
-        };
-        match row {
-            Row::Toggle(id, title, desc, on) => {
-                card(self, pm, Some(*id));
-                let t = self.want(*id, if *on { 1.0 } else { 0.0 });
-                let ease = t * t * (3.0 - 2.0 * t);
-                self.title_desc(pm, title, desc, cx + 18.0, y, rh, cw - 150.0);
-                // the switch: an outline with a dot (off) / an accent fill with a dark dot (on)
-                let (tw, th) = (40.0, 20.0);
-                let (tx, ty) = (right - tw, y + rh / 2.0 - th / 2.0);
-                if ease < 0.5 {
-                    rr(pm, s, tx, ty, tw, th, th / 2.0, TRACK, 1.0 - ease * 2.0);
-                    rr(pm, s, tx + 1.2, ty + 1.2, tw - 2.4, th - 2.4, th / 2.0 - 1.2, mix(CARD, CARD_HOVER, 0.0), 1.0 - ease * 2.0);
-                }
-                rr(pm, s, tx, ty, tw, th, th / 2.0, ACCENT, ease);
-                // the knob stretches while it travels, like a drop of water (and settles with a round dot)
-                let d = 12.0 + ease * 2.0;
-                let stretch = (std::f32::consts::PI * t).sin() * 9.0;
-                let kx = tx + 4.0 + ease * (tw - 8.0 - 14.0) + (14.0 - d) / 2.0 - stretch * ease;
-                rr(pm, s, kx, ty + (th - d) / 2.0, d + stretch, d, d / 2.0, mix(TRACK, ON_ACCENT, ease), 1.0);
-                let lab = if *on { "On" } else { "Off" };
-                let lw = self.fonts.measure(Weight::Regular, lab, 13.5 * s) / s;
-                self.text_mid(pm, Weight::Regular, lab, tx - 14.0 - lw, y + rh / 2.0, 13.5, TEXT);
-                self.hot.push(Hot { id: *id, x: cx, y, w: cw, h: rh });
-            }
-            Row::Slider(id, title, desc, v, lo, hi, text) => {
-                card(self, pm, None);
-                self.title_desc(pm, title, desc, cx + 18.0, y, rh, cw * 0.42);
-                let vw = 56.0;
-                let sw = (cw * 0.34).clamp(120.0, 260.0);
-                let sx = right - vw - 14.0 - sw;
-                let ty = y + rh / 2.0;
-                let frac = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
-                rr(pm, s, sx, ty - 2.0, sw, 4.0, 2.0, TRACK, 1.0);
-                rr(pm, s, sx, ty - 2.0, sw * frac, 4.0, 2.0, ACCENT, 1.0);
-                let held = self.drag == Some(*id);
-                let hov = self.hover == Some(*id);
-                let kx = sx + sw * frac;
-                rr(pm, s, kx - 10.0, ty - 10.0, 20.0, 20.0, 10.0, mix(CARD, TEXT, 0.25), 1.0);
-                                let d = if held { 8.0 } else if hov { 14.0 } else { 12.0 };
-                rr(pm, s, kx - d / 2.0, ty - d / 2.0, d, d, d / 2.0, ACCENT, 1.0);
-                let tw = self.fonts.measure(Weight::Regular, text, 14.0 * s) / s;
-                self.text_mid(pm, Weight::Regular, text, right - tw, ty, 14.0, TEXT);
-                // while it is dragged, the value pops up above the knob
-                if held {
-                    let bw = self.fonts.measure(Weight::Semibold, text, 12.5 * s) / s + 18.0;
-                    rr(pm, s, kx - bw / 2.0, ty - 44.0, bw, 24.0, 12.0, ACCENT, 1.0);
-                    rr(pm, s, kx - 4.0, ty - 22.0, 8.0, 8.0, 2.0, ACCENT, 1.0);
-                    self.text_mid(pm, Weight::Semibold, text, kx - bw / 2.0 + 9.0, ty - 32.0, 12.5, ON_ACCENT);
-                }
-                self.hot.push(Hot { id: *id, x: sx - 12.0, y, w: sw + 24.0, h: rh });
-            }
-            Row::Themes(chosen) => {
-                card(self, pm, None);
-                self.text_mid(pm, Weight::Regular, "Theme", cx + 18.0, y + 20.0, 14.5, TEXT);
-                self.fonts.draw(pm, Weight::Regular, "Colours of this window (the island itself stays black)", (cx + 18.0) * s, (y + 42.0) * s, 12.5 * s, DIM, 1.0);
-                let n = THEMES.len() as f32;
-                let gap = 10.0;
-                let bw = ((cw - 36.0 - gap * (n - 1.0)) / n).min(110.0);
-                for (i, t) in THEMES.iter().enumerate() {
-                    let id = Id::Theme(i as u8);
-                    let bx = cx + 18.0 + i as f32 * (bw + gap);
-                    let by = y + 56.0;
-                    let on = *chosen as usize == i;
-                    let hov = self.hover == Some(id);
-                    // a small sample of the theme: its window, a card and the accent
-                    if on {
-                        rr(pm, s, bx - 2.5, by - 2.5, bw + 5.0, 56.0 + 5.0, 9.5, ACCENT, 1.0);
-                    }
-                    rr(pm, s, bx, by, bw, 56.0, 7.0, if hov && !on { t.edge } else { t.page_bg }, 1.0);
-                    rr(pm, s, bx, by, bw, 56.0, 7.0, t.win_bg, 1.0);
-                    rr(pm, s, bx + 6.0, by + 7.0, bw - 12.0, 22.0, 4.0, t.card, 1.0);
-                    rr(pm, s, bx + 10.0, by + 14.0, bw * 0.38, 4.0, 2.0, t.text, 0.9);
-                    rr(pm, s, bx + 10.0, by + 21.0, bw * 0.24, 3.0, 1.5, t.dim, 0.9);
-                    rr(pm, s, bx + bw - 28.0, by + 14.0, 16.0, 8.0, 4.0, t.accent, 1.0);
-                    rr(pm, s, bx + 6.0, by + 36.0, bw - 12.0, 12.0, 4.0, t.accent, 1.0);
-                    let tw = self.fonts.measure(Weight::Semibold, t.name, 12.0 * s) / s;
-                    self.text_mid(pm, Weight::Semibold, t.name, bx + bw / 2.0 - tw / 2.0, by + 36.0 + 6.0, 11.0, t.on_accent);
-                    self.hot.push(Hot { id, x: bx, y: by, w: bw, h: 56.0 });
-                }
-            }
-            Row::Button(id, title, desc, label, style) => {
-                card(self, pm, None);
-                self.title_desc(pm, title, desc, cx + 18.0, y, rh, cw - 190.0);
-                let (bw, bh) = (116.0, 32.0);
-                let (bx, by) = (right - bw, y + rh / 2.0 - bh / 2.0);
-                let hov = self.hover == Some(*id);
-                let pressed = hov && self.down == Some(*id);
-                let base = if *style == 1 { ACCENT } else { BTN };
-                let col = if pressed { mix(base, [0, 0, 0], 0.22) } else if hov { mix(base, [255, 255, 255], 0.12) } else { base };
-                rr(pm, s, bx, by, bw, bh, 5.0, col, 1.0);
-                let tcol = match style {
-                    1 => ON_ACCENT,
-                    2 => if pal.light { [200, 40, 40] } else { [255, 138, 128] },
-                    _ => TEXT,
-                };
-                let t = self.fonts.fit(Weight::Semibold, label, 13.5 * s, (bw - 14.0) * s);
-                let tw = self.fonts.measure(Weight::Semibold, &t, 13.5 * s) / s;
-                self.text_mid(pm, Weight::Semibold, &t, bx + bw / 2.0 - tw / 2.0, by + bh / 2.0, 13.5, tcol);
-                self.hot.push(Hot { id: *id, x: bx, y: by, w: bw, h: bh });
-            }
-            Row::Radio(title, desc, chosen, options) => {
-                card(self, pm, None);
-                self.title_desc(pm, title, desc, cx + 18.0, y, 68.0, cw - 40.0);
-                for (i, name) in options.iter().enumerate() {
-                    let oy = y + 68.0 + i as f32 * 42.0;
-                    let id = Id::MaxOpt(i as u8);
-                    rr(pm, s, cx + 18.0, oy, cw - 36.0, 1.0, 0.0, EDGE, 1.0);
-                    if self.hover == Some(id) {
-                        rr(pm, s, cx + 1.0, oy + 1.0, cw - 2.0, 41.0, 0.0, CARD_HOVER, 1.0);
-                    }
-                    let on = *chosen == i;
-                    let (rx, ry) = (cx + 18.0, oy + 21.0);
-                    if on {
-                        rr(pm, s, rx, ry - 10.0, 20.0, 20.0, 10.0, ACCENT, 1.0);
-                        rr(pm, s, rx + 6.0, ry - 4.0, 8.0, 8.0, 4.0, ON_ACCENT, 1.0);
-                    } else {
-                        rr(pm, s, rx, ry - 10.0, 20.0, 20.0, 10.0, TRACK, 1.0);
-                        rr(pm, s, rx + 1.4, ry - 8.6, 17.2, 17.2, 8.6, CARD, 1.0);
-                    }
-                    self.text_mid(pm, Weight::Regular, name, rx + 34.0, ry, 14.0, TEXT);
-                    self.hot.push(Hot { id, x: cx, y: oy, w: cw, h: 42.0 });
-                }
-            }
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    #[allow(non_snake_case)]
-    fn title_desc(&mut self, pm: &mut Pixmap, title: &str, desc: &str, x: f32, y: f32, rh: f32, max_w: f32) {
-        let s = self.scale;
-        let (TEXT, DIM) = (self.pal().text, self.pal().dim);
-        if desc.is_empty() {
-            self.text_mid(pm, Weight::Regular, title, x, y + rh / 2.0, 14.5, TEXT);
-        } else {
-            self.text_mid(pm, Weight::Regular, title, x, y + rh / 2.0 - 11.0, 14.5, TEXT);
-            let d = self.fonts.fit(Weight::Regular, desc, 12.5 * s, max_w * s);
-            self.fonts.draw(pm, Weight::Regular, &d, x * s, (y + rh / 2.0 + 12.0 + 4.5) * s, 12.5 * s, DIM, 1.0);
-        }
-    }
-
     // ---------- mouse ----------
 
     fn hit_at(&self, x: f32, y: f32) -> Option<Id> {
@@ -1091,7 +1296,7 @@ impl Panel {
             }
         }
         if let Some(id) = self.drag {
-            return self.set_slider(id, x);
+            return self.set_slider(id, x, y);
         }
         None
     }
@@ -1123,7 +1328,7 @@ impl Panel {
             }
             Some(id @ (Id::CardSecs | Id::Scale | Id::Speed | Id::Volume)) => {
                 self.drag = Some(id);
-                self.set_slider(id, x)
+                self.set_slider(id, x, y)
             }
             _ => None,
         }
@@ -1236,10 +1441,17 @@ impl Panel {
         Some(Act::Changed(s))
     }
 
-    fn set_slider(&mut self, id: Id, x: f32) -> Option<Act> {
+    fn set_slider(&mut self, id: Id, x: f32, y: f32) -> Option<Act> {
         let r = self.hot.iter().find(|r| r.id == id)?;
-        let (sx, sw) = (r.x + 12.0, r.w - 24.0);
-        let frac = ((x / self.scale - sx) / sw).clamp(0.0, 1.0);
+        // the dial: the angle of the mouse around its centre (from 7 o'clock, clockwise, 270 degrees)
+        let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+        let (dx, dy) = (x / self.scale - cx, y / self.scale - cy);
+        let theta = dy.atan2(dx).to_degrees().rem_euclid(360.0);
+        let mut a = (theta - 135.0).rem_euclid(360.0);
+        if a > 270.0 {
+            a = if a < 315.0 { 270.0 } else { 0.0 };
+        }
+        let frac = a / 270.0;
         let (lo, hi) = match id {
             Id::CardSecs => (2.0, 20.0),
             Id::Scale => (80.0, 140.0),
@@ -1259,6 +1471,13 @@ impl Panel {
         *slot = v;
         self.sync_preview();
         Some(Act::Changed(self.s.clone()))
+    }
+
+    /// The middle of a control, in window pixels (for tests and tools).
+    pub fn center_of(&mut self, id: Id) -> Option<(f32, f32)> {
+        self.render();
+        let r = self.hot.iter().find(|r| r.id == id)?;
+        Some(((r.x + r.w / 2.0) * self.scale, (r.y + r.h / 2.0) * self.scale))
     }
 
     /// Press the control `id` as if it was clicked (used by the preview tool and tests).

@@ -27,8 +27,17 @@ fn pages_and_toggle() {
 fn slider_and_radio() {
     let mut p = panel();
     p.set_page(2);
-    let s = changed(p.press(Id::CardSecs)).expect("slider");
-    assert!(s.card_secs > 8 && s.card_secs < 14, "middle of the slider: {}", s.card_secs);
+    // a dial: the mouse straight above its centre (12 o'clock) is the middle of its range
+    let (cx, cy) = p.center_of(Id::CardSecs).expect("the dial");
+    let s = changed(p.mouse_down(cx, cy - 30.0)).expect("dial");
+    let _ = p.mouse_up(cx, cy - 30.0);
+    assert!(s.card_secs > 8 && s.card_secs < 14, "middle of the dial: {}", s.card_secs);
+    // all the way round to the left stop (7 o'clock) and the right stop (5 o'clock)
+    let _ = p.mouse_down(cx - 20.0, cy + 20.0);
+    assert_eq!(p.s.card_secs, 2);
+    let _ = p.mouse_move(cx + 20.0, cy + 20.0);
+    assert_eq!(p.s.card_secs, 20);
+    let _ = p.mouse_up(cx + 20.0, cy + 20.0);
     p.set_page(3);
     let s = changed(p.press(Id::MaxOpt(2))).expect("radio option");
     assert_eq!(s.maximized, MaxMode::Normal);
